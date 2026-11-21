@@ -61,14 +61,28 @@ class FadeTransitionAudioSink(
 }
 
 @OptIn(UnstableApi::class)
-class FadeTransitionRenderersFactory(
+open class FadeTransitionRenderersFactory(
     context: Context,
     val scope: CoroutineScope,
     teeBufferListener: TeeAudioProcessor.AudioBufferSink? = null,
+    private val extraAudioProcessors: Array<AudioProcessor> = emptyArray(),
+    private val forceFloatOutput: Boolean = false,
 ) : DefaultRenderersFactory(context), AudioProcessorChain {
 
     private val teeAudioProcessor = teeBufferListener
         ?.let { TeeAudioProcessor(it) }
+
+    @Volatile
+    var lastAudioSink: AudioSink? = null
+        private set
+
+    @Volatile
+    private var preferredDevice: android.media.AudioDeviceInfo? = null
+
+    fun setPreferredDevice(device: android.media.AudioDeviceInfo?) {
+        preferredDevice = device
+        lastAudioSink?.setPreferredDevice(device)
+    }
 
     override fun buildAudioSink(
         context: Context,
@@ -76,17 +90,21 @@ class FadeTransitionRenderersFactory(
         enableAudioTrackPlaybackParams: Boolean
     ): AudioSink {
         val defaultAudioSink = DefaultAudioSink.Builder(context)
-            .setEnableFloatOutput(enableFloatOutput)
+            .setEnableFloatOutput(enableFloatOutput || forceFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessorChain(this)
             .build()
 
-        return FadeTransitionAudioSink(defaultAudioSink, scope)
+        return FadeTransitionAudioSink(defaultAudioSink, scope).also {
+            it.setPreferredDevice(preferredDevice)
+            lastAudioSink = it
+        }
     }
 
     override fun getAudioProcessors(): Array<AudioProcessor> {
-        return if (teeAudioProcessor != null) arrayOf(teeAudioProcessor)
-        else emptyArray()
+        val processors = extraAudioProcessors.toMutableList()
+        teeAudioProcessor?.let(processors::add)
+        return processors.toTypedArray()
     }
 
     override fun getMediaDuration(playoutDuration: Long): Long = playoutDuration

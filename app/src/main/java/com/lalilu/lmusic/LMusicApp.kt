@@ -9,8 +9,8 @@ import com.lalilu.lalbum.AlbumModule
 import com.lalilu.lartist.ArtistModule
 import com.lalilu.lfolder.FolderModule
 import com.lalilu.lhistory.HistoryModule
-import com.lalilu.lmedia.LMedia
 import com.lalilu.lmusic.utils.extension.ignoreSSLVerification
+import com.lalilu.lmedia.LMedia
 import com.lalilu.lplayer.MPlayer
 import com.lalilu.lplaylist.PlaylistModule
 import com.zhangke.krouter.KRouter

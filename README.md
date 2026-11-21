@@ -13,10 +13,21 @@
 ##### Tips
 在这个项目中尝试过自定义View，也尝试修改Google的Material库以获得满足目标的效果，但大部分都已经用Compose重新实现了，需要看旧的传统View的实现请查阅v1.4.9以前版本的代码。
 
+#### 功能增强（1.6.0）
+
+- 全格式音频软解：APE、DSD（DSF/DFF）、WMA、WavPack、TTA、TAK、AIFF、ALAC 等，硬件优先、FFmpeg 自动接管，也可强制仅软解。
+- 音频输出：采样率/位深选择、32-tap sinc 重采样、DSD 增益、10 段均衡器、无间隙播放、USB 音频直连（实验性）。
+- SPL 逐字歌词：行内逐字/逐词时间戳、`<>` 延迟首字、翻译、显式行结尾、`.spl`/`.lrc` 外挂歌词。
+- 视觉：首页头条与播放条使用毛玻璃 + Monet 取色流光文字，保持原有布局与交互。
+- 详细说明见 [`docs/audio-and-lyrics.md`](docs/audio-and-lyrics.md)。
+
 #### Build 指南
 1. clone 本仓库
-2. 切换至`dev`分支
-3. 拉取子模块`git submodule update --init --recursive`
+2. 准备 Android SDK（compileSdk 35）与 NDK 26.1.10909125
+3. 直接执行 `./gradlew :app:assembleDebug`
+
+`lmedia` 及其 `taglib`/`utfcpp` 依赖已作为普通源码包含在仓库中，不再需要 `git submodule`。
+`lplayer/lib-ffmpeg` 已包含 arm64-v8a / armeabi-v7a / x86_64 的预编译 `libmedia3ext.so`；重新生成 FFmpeg 见 `tools/build_ffmpeg_android.sh`。
 
 #### 参与贡献
 欢迎提Issues和PR，你的Issues就是我最大的动力，你的PR是对我最大的支持，十分感谢！！！

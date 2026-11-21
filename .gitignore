@@ -80,3 +80,8 @@ lint/tmp/
 # lint/reports/
 /app/mapping.txt
 /extension/mapping.txt
+
+# Native build caches
+**/.cxx/
+/ffbuild/
+/lplayer/lib-ffmpeg/build-*/

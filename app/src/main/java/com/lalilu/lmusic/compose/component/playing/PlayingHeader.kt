@@ -22,7 +22,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lalilu.component.card.PlayingTipIcon
+import com.lalilu.lmusic.compose.component.card.FlowingText
 import com.lalilu.lmusic.utils.extension.slideTransition
+import com.lalilu.lmusic.utils.monet.MonetColors
 
 @Composable
 fun PlayingHeader(
@@ -30,6 +32,8 @@ fun PlayingHeader(
     title: () -> String,
     subTitle: () -> String,
     isPlaying: () -> Boolean,
+    monet: MonetColors? = null,
+    flowPhase: Float = 0f,
 ) {
     val density = LocalDensity.current
     val slideMovement = remember { density.run { 50.dp.toPx().toInt() } }
@@ -52,19 +56,32 @@ fun PlayingHeader(
             },
             label = "TitleTextAnimation"
         ) { text ->
-            Text(
-                modifier = Modifier
-                    .wrapContentWidth(Alignment.Start)
-                    .basicMarquee(
-                        iterations = Int.MAX_VALUE,
-                        spacing = MarqueeSpacing(30.dp)
-                    ),
-                text = text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = Color.White,
-                style = MaterialTheme.typography.subtitle1
-            )
+            val marquee = Modifier
+                .wrapContentWidth(Alignment.Start)
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    spacing = MarqueeSpacing(30.dp)
+                )
+            if (monet != null) {
+                FlowingText(
+                    text = text,
+                    monet = monet,
+                    phase = flowPhase,
+                    modifier = marquee,
+                    fontSize = MaterialTheme.typography.subtitle1.fontSize,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            } else {
+                Text(
+                    modifier = marquee,
+                    text = text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = Color.White,
+                    style = MaterialTheme.typography.subtitle1
+                )
+            }
         }
         Row(
             modifier = Modifier
@@ -86,19 +103,33 @@ fun PlayingHeader(
                 },
                 label = "SubTitleTextAnimation"
             ) { text ->
-                Text(
-                    modifier = Modifier
-                        .wrapContentWidth(Alignment.Start)
-                        .basicMarquee(
-                            iterations = Int.MAX_VALUE,
-                            spacing = MarqueeSpacing(30.dp)
-                        ),
-                    text = text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = Color.White.copy(alpha = 0.5f),
-                    style = MaterialTheme.typography.caption,
-                )
+                val marquee = Modifier
+                    .wrapContentWidth(Alignment.Start)
+                    .basicMarquee(
+                        iterations = Int.MAX_VALUE,
+                        spacing = MarqueeSpacing(30.dp)
+                    )
+                if (monet != null) {
+                    FlowingText(
+                        text = text,
+                        monet = monet,
+                        phase = flowPhase + 0.12f,
+                        modifier = marquee,
+                        fontSize = MaterialTheme.typography.caption.fontSize,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        maxLines = 1,
+                        muted = true,
+                    )
+                } else {
+                    Text(
+                        modifier = marquee,
+                        text = text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.caption,
+                    )
+                }
             }
         }
     }

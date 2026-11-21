@@ -28,10 +28,13 @@ class MediaItemFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult? {
-        val songUri = EXTERNAL_CONTENT_URI.buildUpon()
-            .appendEncodedPath(item.mediaId)
-            .build()
-            ?: return null
+        // Custom-folder items use file:// URIs. Do not force them through MediaStore:
+        // appending a full file URI to the audio collection produces an invalid URI.
+        val songUri = item.requestMetadata.mediaUri
+            ?: item.localConfiguration?.uri
+            ?: EXTERNAL_CONTENT_URI.buildUpon()
+                .appendEncodedPath(item.mediaId)
+                .build()
 
         val stream = when (item.mediaMetadata.mediaType) {
             MediaMetadata.MEDIA_TYPE_MUSIC -> {

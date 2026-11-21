@@ -25,6 +25,7 @@ include(":crash")
 include(":lmedia")
 include(":lplayer")
 include(":lplayer:lib-decoder-flac")
+include(":lplayer:lib-ffmpeg")
 
 include(":lplaylist")
 include(":lhistory")

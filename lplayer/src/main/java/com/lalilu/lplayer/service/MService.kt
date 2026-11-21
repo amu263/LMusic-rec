@@ -1,8 +1,11 @@
 package com.lalilu.lplayer.service
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -29,10 +32,16 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.lalilu.lmedia.LMedia
 import com.lalilu.lplayer.MPlayerKV
-import com.lalilu.lplayer.extensions.FadeTransitionRenderersFactory
+import com.lalilu.lplayer.audio.AudioSettings
+import com.lalilu.lplayer.audio.EqAudioProcessor
+import com.lalilu.lplayer.audio.GainAudioProcessor
+import com.lalilu.lplayer.audio.ResampleAudioProcessor
+import com.lalilu.lplayer.extensions.LMusicRenderersFactory
 import com.lalilu.lplayer.extensions.PlayMode
+import com.lalilu.lplayer.extensions.UniversalMediaSourceFactory
 import com.lalilu.lplayer.extensions.playMode
 import com.lalilu.lplayer.extensions.setUpQueueControl
+import com.lalilu.lplayer.usb.UsbAudioManager
 import com.lalilu.lplayer.service.CustomCommand.SeekToNext
 import com.lalilu.lplayer.service.CustomCommand.SeekToPrevious
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +63,17 @@ class MService : MediaLibraryService(), CoroutineScope {
 
     private var exoPlayer: Player? = null
     private var mediaSession: MediaLibrarySession? = null
+    private var renderersFactory: LMusicRenderersFactory? = null
+
+    private val usbReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED ||
+                intent?.action == UsbManager.ACTION_USB_DEVICE_DETACHED
+            ) {
+                applyUsbRouting()
+            }
+        }
+    }
     private val defaultAudioAttributes by lazy {
         AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -70,8 +90,25 @@ class MService : MediaLibraryService(), CoroutineScope {
             MNotificationProvider(this)
         )
 
+        syncAudioSettings()
+        val decoderMode = AudioSettings.decoderMode
+        val processors: Array<androidx.media3.common.audio.AudioProcessor> = arrayOf(
+            GainAudioProcessor(),
+            ResampleAudioProcessor { AudioSettings.outputSampleRate },
+            EqAudioProcessor(),
+        )
+        val factory = LMusicRenderersFactory(
+            context = this,
+            scope = this,
+            softwareOnly = decoderMode == AudioSettings.DECODER_SOFTWARE_ONLY,
+            softwareFirst = decoderMode == AudioSettings.DECODER_SOFTWARE_FIRST,
+            providers = processors,
+        )
+        renderersFactory = factory
+
         exoPlayer = ExoPlayer.Builder(this)
-            .setRenderersFactory(FadeTransitionRenderersFactory(this, this))
+            .setRenderersFactory(factory)
+            .setMediaSourceFactory(UniversalMediaSourceFactory(this))
             .setHandleAudioBecomingNoisy(MPlayerKV.handleBecomeNoisy.value != false)
             .setAudioAttributes(defaultAudioAttributes, MPlayerKV.handleAudioFocus.value != false)
             .setMaxSeekToPreviousPositionMs(Long.MAX_VALUE) // 避免播放上一首需要点两次
@@ -88,9 +125,20 @@ class MService : MediaLibraryService(), CoroutineScope {
             .build()
 
         startListenForValuesUpdate()
+        runCatching {
+            registerReceiver(
+                usbReceiver,
+                IntentFilter().apply {
+                    addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                    addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+                }
+            )
+        }
+        applyUsbRouting()
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(usbReceiver) }
         // 释放相关实例
         exoPlayer?.stop()
         exoPlayer?.release()
@@ -103,6 +151,40 @@ class MService : MediaLibraryService(), CoroutineScope {
     override fun onGetSession(
         controllerInfo: MediaSession.ControllerInfo
     ): MediaLibrarySession? = mediaSession
+
+    private fun applyUsbRouting() = launch(Dispatchers.Main) {
+        val enabled = MPlayerKV.usbExclusive.value == true
+        if (!enabled) {
+            renderersFactory?.setPreferredDevice(null)
+            return@launch
+        }
+        val selected = UsbAudioManager.findDeviceById(
+            this@MService,
+            MPlayerKV.usbDeviceId.value
+        ) ?: UsbAudioManager.listDevices(this@MService).firstOrNull()
+
+        val audioDevice = selected?.usbDevice?.let {
+            UsbAudioManager.findAudioDeviceInfo(this@MService, it)
+        } ?: UsbAudioManager.findAudioDeviceInfo(this@MService)
+        renderersFactory?.setPreferredDevice(audioDevice)
+    }
+
+    private fun syncAudioSettings() {
+        AudioSettings.decoderMode = MPlayerKV.decoderMode.value ?: AudioSettings.DECODER_AUTO
+        AudioSettings.outputSampleRate = MPlayerKV.outputSampleRate.value ?: AudioSettings.SAMPLE_RATE_AUTO
+        AudioSettings.outputBitDepth = (MPlayerKV.outputBitDepth.value ?: 0).takeIf { it != 0 }
+            ?: AudioSettings.BIT_DEPTH_16
+        AudioSettings.dsdGainDb = MPlayerKV.dsdGainDb.value ?: 0
+        AudioSettings.eqEnabled = MPlayerKV.eqEnabled.value ?: false
+        AudioSettings.eqBands = MPlayerKV.eqBands.value
+            ?.split(',')
+            ?.mapNotNull { it.toFloatOrNull() }
+            ?.toFloatArray()
+            ?.takeIf { it.size == 10 }
+            ?: AudioSettings.eqBands
+        AudioSettings.usbExclusive = MPlayerKV.usbExclusive.value ?: false
+        AudioSettings.gaplessEnabled = MPlayerKV.gaplessEnabled.value ?: true
+    }
 
     private fun startListenForValuesUpdate() = launch {
         MPlayerKV.handleAudioFocus.flow().onEach {
@@ -123,10 +205,58 @@ class MService : MediaLibraryService(), CoroutineScope {
                 exoPlayer?.playMode = PlayMode.from(it)
             }
         }.launchIn(this)
+
+        MPlayerKV.decoderMode.flow().onEach {
+            AudioSettings.decoderMode = it ?: AudioSettings.DECODER_AUTO
+        }.launchIn(this)
+
+        MPlayerKV.outputSampleRate.flow().onEach {
+            AudioSettings.outputSampleRate = it ?: AudioSettings.SAMPLE_RATE_AUTO
+        }.launchIn(this)
+
+        MPlayerKV.outputBitDepth.flow().onEach {
+            AudioSettings.outputBitDepth = (it ?: 0).takeIf { value -> value != 0 }
+                ?: AudioSettings.BIT_DEPTH_16
+        }.launchIn(this)
+
+        MPlayerKV.dsdGainDb.flow().onEach {
+            AudioSettings.dsdGainDb = it ?: 0
+        }.launchIn(this)
+
+        MPlayerKV.eqEnabled.flow().onEach {
+            AudioSettings.eqEnabled = it ?: false
+        }.launchIn(this)
+
+        MPlayerKV.eqBands.flow().onEach {
+            val values = it?.split(',')?.mapNotNull { value -> value.toFloatOrNull() }
+            if (values?.size == 10) AudioSettings.updateEqBands(values.toFloatArray())
+        }.launchIn(this)
+
+        MPlayerKV.usbExclusive.flow().onEach {
+            AudioSettings.usbExclusive = it ?: false
+            applyUsbRouting()
+        }.launchIn(this)
+
+        MPlayerKV.usbDeviceId.flow().onEach {
+            applyUsbRouting()
+        }.launchIn(this)
+
+        MPlayerKV.gaplessEnabled.flow().onEach {
+            AudioSettings.gaplessEnabled = it ?: true
+        }.launchIn(this)
     }
 }
 
 private class MPlayerListener(val player: Player) : Player.Listener {
+    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+        com.blankj.utilcode.util.LogUtils.e("PlaybackError", error)
+        android.util.Log.println(
+            android.util.Log.ERROR,
+            "LMusicPlaybackError",
+            error.stackTraceToString()
+        )
+    }
+
     override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
         val playMode = PlayMode.of(
             repeatMode = player.repeatMode,

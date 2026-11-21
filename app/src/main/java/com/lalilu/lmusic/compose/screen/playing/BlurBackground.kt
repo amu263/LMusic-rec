@@ -32,6 +32,7 @@ fun BlurBackground(
     modifier: Modifier = Modifier,
     imageData: () -> Any,
     onBackgroundColorFetched: (Color) -> Unit,
+    onPaletteFetched: (Palette) -> Unit = {},
     blurProgress: () -> Float,
 ) {
     val context = LocalContext.current
@@ -104,9 +105,9 @@ fun BlurBackground(
                 }
 
                 samplingBitmap.value?.let {
-                    val color = Palette.from(it)
-                        .generate()
-                        .getAutomaticColor()
+                    val palette = Palette.from(it).generate()
+                    onPaletteFetched(palette)
+                    val color = palette.getAutomaticColor()
                     onBackgroundColorFetched(Color(color))
                 }
             }

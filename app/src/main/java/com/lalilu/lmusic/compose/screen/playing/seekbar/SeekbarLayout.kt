@@ -11,6 +11,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -47,6 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
@@ -70,6 +73,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.lalilu.RemixIcon
 import com.lalilu.common.AccumulatedValue
+import com.lalilu.lmusic.utils.monet.MonetColors
+import com.lalilu.lmusic.utils.monet.lightFlow
 import com.lalilu.remixicon.Media
 import com.lalilu.remixicon.media.orderPlayFill
 import com.lalilu.remixicon.media.repeatOneFill
@@ -112,6 +117,8 @@ fun SeekbarLayout(
     scrollThreadHold: Float = 200f,
     animation: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) },
     animateColor: () -> Color = { Color.DarkGray },
+    monet: MonetColors? = null,
+    flowPhase: Float = 0f,
     onDragStart: suspend (Offset) -> Unit = {},
     onDragStop: suspend (Int) -> Unit = {},
     onDispatchDragOffset: (Float) -> Unit = {},
@@ -119,8 +126,8 @@ fun SeekbarLayout(
     onSwitchTo: (Int) -> Unit = {},
     onClick: (ClickPart) -> Unit = {}
 ) {
-    val textStyle = remember {
-        TextStyle.Default.copy(
+    val textStyle = remember(monet, flowPhase) {
+        val base = TextStyle.Default.copy(
             fontSize = 16.sp,
             lineHeight = 16.sp,
             fontWeight = FontWeight.Bold,
@@ -129,6 +136,17 @@ fun SeekbarLayout(
             color = Color.White,
             fontFamily = FontFamily.Monospace
         )
+        if (monet == null) {
+            base
+        } else {
+            base.copy(
+                brush = Brush.linearGradient(
+                    colors = monet.lightFlow,
+                    start = Offset(flowPhase * 320f - 40f, 0f),
+                    end = Offset(flowPhase * 320f + 240f, 0f)
+                )
+            )
+        }
     }
 
     BoxWithConstraints(
@@ -339,6 +357,34 @@ fun SeekbarLayout(
                     },
                     onDrag = { _, dragAmount ->
                         draggableState.dispatchRawDelta(dragAmount)
+                    }
+                )
+                .then(
+                    if (monet != null) {
+                        Modifier
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        monet.surface.copy(alpha = 0.56f),
+                                        monet.surface.copy(alpha = 0.34f),
+                                        monet.primary.copy(alpha = 0.12f),
+                                    )
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .border(
+                                width = 0.8.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.30f),
+                                        monet.primary.copy(alpha = 0.18f),
+                                        Color.White.copy(alpha = 0.04f),
+                                    )
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                    } else {
+                        Modifier
                     }
                 )
                 .graphicsLayer {

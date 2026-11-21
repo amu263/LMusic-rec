@@ -4,10 +4,17 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -19,10 +26,12 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +40,8 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -48,6 +59,8 @@ import com.lalilu.component.extension.DynamicTipsItem
 import com.lalilu.component.extension.hideControl
 import com.lalilu.lmedia.lyric.LyricItem
 import com.lalilu.lmedia.lyric.LyricSourceEmbedded
+import com.lalilu.lmedia.lyric.LyricSourceFactory
+import com.lalilu.lmedia.lyric.LyricSourceLocal
 import com.lalilu.lmedia.lyric.LyricUtils
 import com.lalilu.lmusic.compose.component.playing.LyricViewToolbar
 import com.lalilu.lmusic.compose.component.playing.PlayingToolbar
@@ -55,12 +68,14 @@ import com.lalilu.lmusic.compose.screen.playing.lyric.LyricLayout
 import com.lalilu.lmusic.compose.screen.playing.seekbar.ClickPart
 import com.lalilu.lmusic.compose.screen.playing.seekbar.SeekbarLayout
 import com.lalilu.lmusic.datastore.SettingsSp
+import com.lalilu.lmusic.utils.monet.rememberMonetColors
 import com.lalilu.lplayer.MPlayer
 import com.lalilu.lplayer.action.PlayerAction
 import com.lalilu.lplayer.extensions.PlayMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import androidx.palette.graphics.Palette
 import org.koin.compose.koinInject
 import kotlin.math.pow
 
@@ -77,7 +92,22 @@ fun PlayingLayout(
 
     val isLyricScrollEnable = remember { mutableStateOf(false) }
     val backgroundColor = remember { mutableStateOf(Color.DarkGray) }
-    val animateColor = animateColorAsState(targetValue = backgroundColor.value, label = "")
+    val palette = remember { mutableStateOf<Palette?>(null) }
+    val monet = rememberMonetColors(palette.value)
+    val flowTransition = rememberInfiniteTransition(label = "playing-flow")
+    val flowPhase by flowTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(7200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "playing-flow-phase"
+    )
+    val animateColor = animateColorAsState(
+        targetValue = if (palette.value == null) backgroundColor.value else monet.surface,
+        label = ""
+    )
     val scrollToTopEvent = remember { mutableStateOf(0L) }
     val currentPosition = remember { mutableFloatStateOf(0f) }
     val animation = remember { Animatable(0f) }
@@ -154,6 +184,8 @@ fun PlayingLayout(
                     isUserTouchEnable = { draggable.state.value == DragAnchor.Min || draggable.state.value == DragAnchor.Max },
                     isExtraVisible = { draggable.state.value == DragAnchor.Max },
                     onClick = { scrollToTopEvent.value = System.currentTimeMillis() },
+                    monet = monet,
+                    flowPhase = flowPhase,
                     extraContent = { LyricViewToolbar() }
                 )
             }
@@ -229,13 +261,34 @@ fun PlayingLayout(
                         },
                     blurProgress = { middleToMaxProgress.value },
                     onBackgroundColorFetched = { backgroundColor.value = it },
+                    onPaletteFetched = { palette.value = it },
                     imageData = {
                         MPlayer.currentMediaItem
                             ?: com.lalilu.component.R.drawable.ic_music_2_line_100dp
                     }
                 )
 
-                val lyricSource = remember { LyricSourceEmbedded(context = context) }
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    monet.primary.copy(alpha = 0.045f),
+                                    monet.tertiary.copy(alpha = 0.035f),
+                                    Color.Transparent,
+                                ),
+                                start = Offset(flowPhase * 1400f - 600f, 0f),
+                                end = Offset(flowPhase * 1400f + 600f, 1600f),
+                            )
+                        )
+                )
+
+                val lyricSource = remember { LyricSourceFactory(
+                    LyricSourceLocal(context),
+                    LyricSourceEmbedded(context = context)
+                ) }
                 val lyrics = remember { mutableStateOf<List<LyricItem>>(emptyList()) }
 
                 LaunchedEffect(key1 = MPlayer.currentMediaItem) {
@@ -317,7 +370,9 @@ fun PlayingLayout(
                         .hideControl(enable = { hideComponent.value })
                         .padding(horizontal = 40.dp)
                         .padding(bottom = 100.dp),
-                    animateColor = { animateColor.value },
+                    animateColor = { monet.primary },
+                    monet = monet,
+                    flowPhase = flowPhase,
                     maxValue = { MPlayer.currentDuration.toFloat() },
                     animation = animation,
                     dataValue = { currentPosition.floatValue },

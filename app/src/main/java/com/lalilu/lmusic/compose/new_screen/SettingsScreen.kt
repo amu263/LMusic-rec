@@ -43,6 +43,7 @@ import com.lalilu.component.settings.SettingCategory
 import com.lalilu.component.settings.SettingFilePicker
 import com.lalilu.component.settings.SettingProgressSeekBar
 import com.lalilu.component.settings.SettingStateSeekBar
+import com.lalilu.component.navigation.AppRouter
 import com.lalilu.component.settings.SettingSwitcher
 import com.lalilu.crash.CrashHelper
 import com.lalilu.lmedia.scanner.FileSystemScanner
@@ -192,6 +193,18 @@ private fun SettingsScreen(
                     subTitle = "请选择TTF格式的字体文件",
                     mimeType = "font/ttf"
                 )
+                Row(
+                    Modifier.padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    IconTextButton(
+                        text = "音频输出与解码（Pro）",
+                        iconPainter = painterResource(id = R.drawable.ic_loader_line),
+                        showIcon = { true },
+                        color = Color(0xFF006E7C),
+                        onClick = { AppRouter.route("/pages/audio_settings").push() }
+                    )
+                }
                 SettingStateSeekBar(
                     state = lyricGravity,
                     selection = stringArrayResource(id = R.array.lyric_gravity_text).toList(),

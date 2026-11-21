@@ -56,6 +56,8 @@ import com.lalilu.R
 import com.lalilu.component.extension.DialogWrapper
 import com.lalilu.lmedia.lyric.LyricItem
 import com.lalilu.lmedia.lyric.LyricSourceEmbedded
+import com.lalilu.lmedia.lyric.LyricSourceFactory
+import com.lalilu.lmedia.lyric.LyricSourceLocal
 import com.lalilu.lmedia.lyric.LyricUtils
 import com.lalilu.lmusic.compose.component.playing.LyricViewActionDialog
 import com.lalilu.lmusic.compose.screen.playing.lyric.LyricLayout
@@ -176,7 +178,10 @@ fun LyricPanel(
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
-    val lyricSource = remember { LyricSourceEmbedded(context = context) }
+    val lyricSource = remember { LyricSourceFactory(
+                    LyricSourceLocal(context),
+                    LyricSourceEmbedded(context = context)
+                ) }
     val lyrics = remember { mutableStateOf<List<LyricItem>>(emptyList()) }
     val isLyricScrollEnable = remember { mutableStateOf(false) }
     val listState = rememberLazyListState()

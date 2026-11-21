@@ -9,7 +9,7 @@ import com.flyjingfish.android_aop_annotation.anno.AndroidAopReplaceMethod
 class LogOverride {
 
     companion object {
-        const val isEnableOriginOutput = false
+        val isEnableOriginOutput = com.lalilu.BuildConfig.BUILD_TYPE == "debug" || com.lalilu.BuildConfig.BUILD_TYPE == "alpha"
 
         @AndroidAopReplaceMethod("int v(java.lang.String,java.lang.String)")
         @JvmStatic

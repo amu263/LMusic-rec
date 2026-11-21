@@ -48,8 +48,8 @@ android {
         applicationId = "com.lalilu.lmusic"
         minSdk = libs.versions.min.sdk.version.get().toIntOrNull()
         targetSdk = libs.versions.compile.version.get().toIntOrNull()
-        versionCode = 42
-        versionName = "1.5.4"
+        versionCode = 43
+        versionName = "1.6.0"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -162,6 +162,13 @@ android {
     lint {
         disable += "Instantiatable"
         abortOnError = false
+    }
+
+    packaging {
+        jniLibs {
+            // 16 KB page-size devices require uncompressed, page-aligned native libraries.
+            useLegacyPackaging = false
+        }
     }
 }
 
