@@ -283,13 +283,19 @@ class UsbBitPerfectAudioSink(
                     resampler = if (targetRate != format.sampleRate) {
                         SincResampler(format.sampleRate, targetRate, format.channels)
                     } else null
-                    opened.setVolumePercent(UsbAudioSettings.volumePercent, UsbAudioSettings.smoothHandoff)
+                    val digitalMode = UsbAudioSettings.volumeMode == UsbAudioSettings.VOLUME_MODE_DIGITAL
+                    opened.setVolumePercent(
+                        if (digitalMode) 100 else UsbAudioSettings.volumePercent,
+                        UsbAudioSettings.smoothHandoff,
+                    )
                     val afterVolume = opened.status()
                     val hw = afterVolume.hardwareVolumeAvailable
                     lastAppliedVolume = UsbAudioSettings.volumePercent
-                    val useDigital = !hw || UsbAudioSettings.volumeMode == UsbAudioSettings.VOLUME_MODE_DIGITAL
+                    val useDigital = !hw || digitalMode
                     digitalGainTarget = if (useDigital) UsbAudioSettings.digitalGain() else 1f
-                    digitalGainCurrent = if (useDigital) 0f else 1f
+                    // Short software fade-in: even with hardware volume at its safe low
+                    // starting point, this removes the first-packet click on many DACs.
+                    digitalGainCurrent = 0f
                     UsbOutputDiagnostics.update {
                         it.copy(
                             deviceName = selected.productName ?: "USB DAC",
@@ -728,14 +734,27 @@ class UsbBitPerfectAudioSink(
         val target = UsbAudioSettings.volumePercent
         lastAppliedVolume = target
         val status = output.status()
-        digitalGainTarget = if (!status.hardwareVolumeAvailable ||
-            UsbAudioSettings.volumeMode == UsbAudioSettings.VOLUME_MODE_DIGITAL
-        ) UsbAudioSettings.digitalGain() else 1f
-        if (!UsbAudioSettings.smoothHandoff || status.hardwareVolumeDb == null) {
+        val digitalMode = UsbAudioSettings.volumeMode == UsbAudioSettings.VOLUME_MODE_DIGITAL
+        val useDigital = !status.hardwareVolumeAvailable || digitalMode
+        digitalGainTarget = if (useDigital) UsbAudioSettings.digitalGain(target) else 1f
+        volumeJob?.cancel()
+        if (digitalMode) {
+            // Mute the software stage first, then open the DAC hardware stage; this avoids
+            // a full-scale transient when switching from hardware to digital control.
+            digitalGainCurrent = 0f
+            volumeJob = volumeScope.launch {
+                delay(80)
+                runCatching { output.setVolumePercent(100, false) }
+            }
+            return
+        }
+        digitalGainCurrent = if (useDigital) 0f else 1f
+        if (!UsbAudioSettings.smoothHandoff || status.hardwareVolumeDb == null ||
+            !status.hardwareVolumeAvailable
+        ) {
             output.setVolumePercent(target, false)
             return
         }
-        volumeJob?.cancel()
         volumeJob = volumeScope.launch {
             val from = status.volumePercent
             if (from == target) return@launch
