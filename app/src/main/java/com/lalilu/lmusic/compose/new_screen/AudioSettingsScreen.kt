@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
 import com.lalilu.R
 import com.lalilu.RemixIcon
-import com.lalilu.component.base.NavigatorHeader
+import com.lalilu.component.navigation.AppRouter
 import com.lalilu.component.base.screen.ScreenInfo
 import com.lalilu.component.base.screen.ScreenInfoFactory
 import com.lalilu.component.base.smartBarPadding
@@ -46,9 +46,7 @@ import com.lalilu.component.settings.SettingSwitcher
 import com.lalilu.lplayer.MPlayerKV
 import com.lalilu.lplayer.audio.AudioSettings
 import com.lalilu.lplayer.audio.Pcm24AudioSink
-import com.lalilu.lplayer.usb.UsbAudioManager
-import com.lalilu.lplayer.usb.UsbOutputDiagnostics
-import com.lalilu.usbuac.UsbAudioSession
+
 import com.lalilu.remixicon.System
 import com.lalilu.remixicon.system.settings4Line
 import com.zhangke.krouter.annotation.Destination
@@ -109,9 +107,10 @@ private fun AudioSettingsContent() {
         )
     ) {
         item {
-            NavigatorHeader(
+            SaltPageHeader(
                 title = "音频输出",
-                subTitle = "解码、采样率、位深与音效（Pro）"
+                subtitle = "解码、采样率、位深与音效",
+                onRefresh = null,
             )
         }
 
@@ -228,141 +227,24 @@ private fun AudioSettingsContent() {
         }
 
         item {
-            SettingCategory(
-                icon = painterResource(id = R.drawable.ic_settings_4_line),
-                title = "USB 音频（Pro）"
-            ) {
-                SettingSwitcher(
-                    state = { usbExclusive.value == true },
-                    onStateUpdate = {
-                        if (it) MPlayerKV.usbBitPerfect.value = false
-                        usbExclusive.value = it
-                    },
-                    title = "USB 直连（AudioTrack routing）",
-                    subTitle = "优先将 Android 音频路由到 USB DAC"
+            SaltSection("USB 音频") {
+                SaltSwitchRow(
+                    title = "USB 直连（AudioTrack 路由）",
+                    subtitle = "优先将 Android 音频路由到 USB DAC",
+                    checked = MPlayerKV.usbExclusive.value == true,
+                ) {
+                    MPlayerKV.usbExclusive.value = it
+                    if (it) MPlayerKV.usbBitPerfect.value = false
+                }
+                SaltDropdownRow(
+                    title = "USB 独占模式",
+                    value = if (MPlayerKV.usbBitPerfect.value == true) "已开启" else "未开启",
+                    subtitle = "UAC 等时传输、DAC 硬件音量与安全默认音量",
+                    onClick = { AppRouter.route("/pages/usb_exclusive").push() },
                 )
-                SettingSwitcher(
-                    state = { MPlayerKV.usbBitPerfect.value == true },
-                    onStateUpdate = {
-                        MPlayerKV.usbBitPerfect.value = it
-                        if (it) usbExclusive.value = false
-                    },
-                    title = "USB 独占（bit-perfect，实验性）",
-                    subTitle = "等时 USB 传输，保留解码后 PCM；设备或格式不支持时切回 AudioTrack"
-                )
-                UsbAudioDeviceList()
             }
         }
 
         smartBarPadding()
-    }
-}
-
-@Composable
-private fun UsbAudioDeviceList() {
-    val context = LocalContext.current
-    var devices by remember { mutableStateOf(UsbAudioManager.listDevices(context)) }
-    var permissionTick by remember { mutableIntStateOf(0) }
-    val selectedId = MPlayerKV.usbDeviceId.value
-    val status by UsbOutputDiagnostics.status.collectAsState()
-    var descriptors by remember { mutableStateOf("") }
-    val selected = UsbAudioManager.selectExclusiveDevice(devices, selectedId)
-    LaunchedEffect(selected?.id, permissionTick) {
-        descriptors = ""
-        val usb = selected?.usbDevice ?: return@LaunchedEffect
-        if (!UsbAudioManager.hasPermission(context, usb)) return@LaunchedEffect
-        descriptors = withContext(Dispatchers.IO) {
-            val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-            runCatching { UsbAudioSession.describe(manager, usb).joinToString("\n") }
-                .getOrElse { "读取 USB 描述符失败 · ${it.message}" }
-        }
-    }
-
-    val permissionReceiver = remember {
-        UsbAudioManager.permissionReceiver { _, granted ->
-            permissionTick++
-            if (granted) Toast.makeText(context, "USB 权限已授予", Toast.LENGTH_SHORT).show()
-            else Toast.makeText(context, "USB 权限被拒绝", Toast.LENGTH_SHORT).show()
-        }
-    }
-    val attachReceiver = remember {
-        object : android.content.BroadcastReceiver() {
-            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
-                devices = UsbAudioManager.listDevices(context)
-            }
-        }
-    }
-
-    DisposableEffect(Unit) {
-        UsbAudioManager.registerPermissionReceiver(context, permissionReceiver)
-        val filter = android.content.IntentFilter().apply {
-            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
-            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
-        }
-        runCatching { context.registerReceiver(attachReceiver, filter) }
-        onDispose {
-            UsbAudioManager.unregisterReceiver(context, permissionReceiver)
-            runCatching { context.unregisterReceiver(attachReceiver) }
-        }
-    }
-
-    LaunchedEffect(permissionTick) {
-        devices = UsbAudioManager.listDevices(context)
-    }
-
-    if (status.isNotEmpty()) {
-        Text(
-            text = status,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-            fontSize = 12.sp
-        )
-    }
-
-    if (devices.isEmpty()) {
-        Text(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-            text = "未检测到 USB 音频输出设备，请连接 USB DAC 后重试。",
-            fontSize = 12.sp,
-            color = androidx.compose.material.MaterialTheme.colors.onBackground.copy(0.5f)
-        )
-        return
-    }
-
-    devices.forEach { device ->
-        val isSelected = device.id == selectedId ||
-            (MPlayerKV.usbBitPerfect.value == true && device.id == selected?.id)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    MPlayerKV.usbDeviceId.value = device.id
-                    if (MPlayerKV.usbBitPerfect.value != true) MPlayerKV.usbExclusive.value = true
-                    if (!UsbAudioManager.hasPermission(context, device.usbDevice)) {
-                        UsbAudioManager.requestPermission(context, device.usbDevice)
-                    } else {
-                        Toast.makeText(context, "已选择 ${device.name}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-        ) {
-            Text(
-                text = (if (isSelected) "✓ " else "") + device.summary,
-                fontSize = 14.sp,
-                color = if (isSelected) Color(0xFF006E7C)
-                else androidx.compose.material.MaterialTheme.colors.onBackground
-            )
-            Text(
-                text = "VID:${device.vendorId.toString(16)} PID:${device.productId.toString(16)}",
-                fontSize = 11.sp,
-                color = androidx.compose.material.MaterialTheme.colors.onBackground.copy(0.5f)
-            )
-        }
-    }
-    if (descriptors.isNotEmpty()) {
-        Text(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-            text = descriptors,
-            fontSize = 11.sp
-        )
     }
 }

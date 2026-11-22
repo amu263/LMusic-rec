@@ -147,7 +147,9 @@ struct Stream {
     AudioAlt chosen;
     int claimed{-1};
     int controlClaimed{-1};
-    int rate, inputBytes, channelCount, inputFrame, outputFrame{}, baseHz{}, periods{};
+    int rate, inputBytes, channelCount, targetChannels{}, inputFrame, outputFrame{}, baseHz{}, periods{};
+    int bufferMs, targetFrames{};
+    bool channelCompat{}, bitCompat{};
     int clockId{};
     double nominal{}, framesPerPacket{}, fraction{};
     std::thread worker;
@@ -159,18 +161,26 @@ struct Stream {
     std::atomic<bool> running{false}, closing{false}, draining{false};
     std::atomic<int> failure{0};
     std::atomic<int64_t> submitted{0}, completed{0}, underruns{0}, errors{0}, feedbackCount{0};
-    std::atomic<float> requestedVolume{-1};
+    std::atomic<int64_t> peakSample{0}, clippedSamples{0}, anomalySamples{0};
+    std::atomic<float> requestedVolumePercent{-1};
+    std::atomic<bool> requestedVolumeSmooth{true};
     std::atomic<int> volumeResult{0};
+    int volLow{}, volHigh{}, volStep{}, volCurrent{}, volTarget{-1};
+    bool volumeSmooth{true};
     int consecutiveErrors{};
     bool primed{}, resume{};
     std::chrono::steady_clock::time_point feedbackDeadline;
 
-    Stream(int fd, int sampleRate, int channels, int bits)
+    Stream(int fd, int sampleRate, int channels, int bits, int requestedBufferMs,
+           bool compatChannels, bool compatBits)
         : device(fd), rate(sampleRate), inputBytes(bits / 8), channelCount(channels),
-          inputFrame(channels * inputBytes) {
+          inputFrame(channels * inputBytes), bufferMs(std::clamp(requestedBufferMs, 100, 2000)),
+          channelCompat(compatChannels), bitCompat(compatBits) {
         try {
             select(bits);
-            ring.resize(size_t(std::max(1, rate / 4)) * inputFrame);
+            targetFrames = rate * bufferMs / 1000;
+            ring.resize(size_t(std::max(1, targetFrames)) * inputFrame);
+            initVolume();
             const int packets = std::clamp(baseHz / periods / 500, 1, 16);
             for (int i = 0; i < TransferCount; ++i) addSlot(false, packets, chosen.packet, chosen.endpoint);
             if (chosen.feedback) {
@@ -218,7 +228,9 @@ struct Stream {
         if (detach != LIBUSB_ERROR_NOT_SUPPORTED) check(detach, "enable USB driver detach");
         std::string reason = "No matching PCM alternate setting";
         for (const auto& alt : choices) {
-            if (alt.channels != channelCount || alt.bits < bits || alt.bytes < inputBytes) continue;
+            if (alt.channels < channelCount || (!channelCompat && alt.channels != channelCount)) continue;
+            if (alt.bytes < inputBytes || (!bitCompat && alt.bytes != inputBytes)) continue;
+            if (alt.bits < bits) continue;
             if (alt.sync == 1 && (!alt.feedback || alt.feedbackPacket < 3)) {
                 reason = describe(alt) + ": asynchronous endpoint needs explicit feedback";
                 continue;
@@ -235,7 +247,8 @@ struct Stream {
             }
             periods = 1 << (alt.interval - 1);
             nominal = double(rate) * periods / baseHz;
-            outputFrame = alt.bytes * channelCount;
+            targetChannels = alt.channels;
+            outputFrame = alt.bytes * targetChannels;
             if ((std::ceil(nominal) + (alt.sync == 1 && nominal == std::ceil(nominal) ? 1 : 0)) *
                 outputFrame > alt.packet) continue;
             int result = libusb_claim_interface(device.handle, alt.interface);
@@ -272,6 +285,62 @@ struct Stream {
                                  std::to_string(bits) + "bit, " + std::to_string(channelCount) + "ch)");
     }
 
+    void initVolume() {
+        const auto* feature = masterFeature(chosen);
+        if (!feature || controlClaimed < 0) return;
+        const int index = ((*feature)[3] << 8) | chosen.control;
+        uint8_t data[256]{};
+        auto signed16 = [](const uint8_t* p) { return int(int16_t(little(p, 2))); };
+        if (chosen.version == 2) {
+            const int length = control(device, 0xa1, 2, 0x200, index, data, sizeof(data));
+            if (length < 8 || little(data, 2) != 1) return;
+            volLow = signed16(data + 2);
+            volHigh = signed16(data + 4);
+            volStep = signed16(data + 6);
+        } else {
+            if (control(device, 0xa1, 0x82, 0x200, index, data, 2) != 2) return;
+            volLow = signed16(data);
+            if (control(device, 0xa1, 0x83, 0x200, index, data, 2) != 2) return;
+            volHigh = signed16(data);
+            if (control(device, 0xa1, 0x84, 0x200, index, data, 2) != 2) return;
+            volStep = signed16(data);
+        }
+        if (volLow > volHigh || volStep < 0) return;
+        volumeResult = 1;
+        // Never inherit a DAC's last (possibly full-scale) hardware setting.
+        applyVolumeRaw(volLow);
+        volCurrent = volLow;
+    }
+
+    bool applyVolumeRaw(int db) {
+        const auto* feature = masterFeature(chosen);
+        if (!feature) return false;
+        const int index = ((*feature)[3] << 8) | chosen.control;
+        db = std::clamp(db, volLow, volHigh);
+        if (volStep > 0) db = volLow + ((db - volLow) / volStep) * volStep;
+        uint8_t data[2] = {uint8_t(db), uint8_t(db >> 8)};
+        return control(device, 0x21, 1, 0x200, index, data, 2) == 2;
+    }
+
+    void setVolumePercent(float percent, bool smooth) {
+        if (volumeResult <= 0) return;
+        percent = std::clamp(percent, 0.0f, 100.0f);
+        int db = volLow + int(std::lround((volHigh - volLow) * percent / 100.0));
+        if (volStep > 0) db = volLow + ((db - volLow) / volStep) * volStep;
+        volumeSmooth = smooth;
+        if (!smooth) {
+            if (applyVolumeRaw(db)) {
+                volCurrent = db;
+                volTarget = db;
+            }
+            return;
+        }
+        if (applyVolumeRaw(db)) {
+            volCurrent = db;
+            volTarget = db;
+        }
+    }
+
     void addSlot(bool feedback, int packets, int maxPacket, int endpoint) {
         auto slot = std::make_unique<Slot>(this, feedback, packets, maxPacket);
         libusb_fill_iso_transfer(slot->transfer, device.handle, endpoint, slot->data.data(),
@@ -293,29 +362,46 @@ struct Stream {
         return frames;
     }
 
+    static int sampleValue(const uint8_t* data, int bytes) {
+        int32_t value = 0;
+        memcpy(&value, data, std::min(bytes, 4));
+        if (bytes == 3 && (value & 0x800000)) value |= 0xff000000;
+        return value;
+    }
+
     int fill(uint8_t* output, int frames) {
         std::lock_guard<std::mutex> lock(mutex);
         const int available = std::min(frames, int(queued / inputFrame));
         const int padding = chosen.bytes - inputBytes;
-        if (!padding) {
-            const size_t size = size_t(available) * inputFrame;
-            const size_t tail = std::min(size, ring.size() - readAt);
-            memcpy(output, ring.data() + readAt, tail);
-            memcpy(output + tail, ring.data(), size - tail);
-            readAt = (readAt + size) % ring.size();
-        } else {
-            for (int i = 0; i < available * channelCount; ++i) {
-                memset(output + i * chosen.bytes, 0, padding);
-                // Read indices and ring size are sample-aligned.
-                memcpy(output + i * chosen.bytes + padding, ring.data() + readAt, inputBytes);
-                readAt = (readAt + inputBytes) % ring.size();
+        int64_t peak = 0;
+        int64_t clipped = 0;
+        for (int frame = 0; frame < available; ++frame) {
+            uint8_t* dst = output + size_t(frame) * outputFrame;
+            memset(dst, 0, outputFrame);
+            for (int channel = 0; channel < targetChannels; ++channel) {
+                const int source = channel < channelCount ? channel : (channelCount == 1 ? 0 : -1);
+                if (source < 0) continue;
+                const uint8_t* sample = ring.data() + readAt + size_t(source) * inputBytes;
+                memcpy(dst + size_t(channel) * chosen.bytes + padding, sample, inputBytes);
+                int value = sampleValue(sample, inputBytes);
+                int64_t magnitude = std::llabs(int64_t(value));
+                peak = std::max(peak, magnitude);
+                int maxValue = inputBytes == 4 ? INT32_MAX : ((1 << (inputBytes * 8 - 1)) - 1);
+                if (magnitude >= maxValue) ++clipped;
             }
+            readAt = (readAt + inputFrame) % ring.size();
         }
         queued -= size_t(available) * inputFrame;
         if (available < frames) {
-            memset(output + available * outputFrame, 0, (frames - available) * outputFrame);
-            if (!draining) ++underruns;
+            memset(output + size_t(available) * outputFrame, 0,
+                   size_t(frames - available) * outputFrame);
+            if (!draining) {
+                ++underruns;
+                anomalySamples += int64_t(frames - available) * targetChannels;
+            }
         }
+        if (peak > peakSample) peakSample = peak;
+        clippedSamples += clipped;
         return available;
     }
 
@@ -411,12 +497,12 @@ struct Stream {
                 for (const auto& slot : slots) if (slot->active) libusb_cancel_transfer(slot->transfer);
             }
             if (!terminate) {
-                const float gain = requestedVolume.exchange(-1);
-                if (gain >= 0) volumeResult = volume(gain) ? 1 : -1;
+                const float percent = requestedVolumePercent.exchange(-1);
+                if (percent >= 0) setVolumePercent(percent, requestedVolumeSmooth.exchange(true));
             }
             if (!terminate && running) {
                 const auto pendingFrames = submitted - completed;
-                if (!primed && pendingFrames > 0 && (draining || pendingFrames >= rate / 100 || resume)) {
+                if (!primed && pendingFrames > 0 && (draining || pendingFrames >= targetFrames / 2 || resume)) {
                     primed = true;
                     resume = true;
                     feedbackDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -450,39 +536,17 @@ struct Stream {
         }
     }
 
-    bool volume(float gain) {
-        if (failure || controlClaimed < 0) return false;
-        const auto* feature = masterFeature(chosen);
-        if (!feature) return false;
-        const int index = ((*feature)[3] << 8) | chosen.control;
-        uint8_t data[256]{};
-        int low, high, step;
-        auto signed16 = [](const uint8_t* p) { return int(int16_t(little(p, 2))); };
-        if (chosen.version == 2) {
-            const int length = control(device, 0xa1, 2, 0x200, index, data, sizeof(data));
-            if (length < 8 || little(data, 2) != 1) return false;
-            low = signed16(data + 2);
-            high = signed16(data + 4);
-            step = signed16(data + 6);
-        } else {
-            if (control(device, 0xa1, 0x82, 0x200, index, data, 2) != 2) return false;
-            low = signed16(data);
-            if (control(device, 0xa1, 0x83, 0x200, index, data, 2) != 2) return false;
-            high = signed16(data);
-            if (control(device, 0xa1, 0x84, 0x200, index, data, 2) != 2) return false;
-            step = signed16(data);
-        }
-        if (low > high || step < 0) return false;
-        int db = gain <= 0 ? low : int(std::round(20 * std::log10(gain) * 256));
-        db = std::clamp(db, low, high);
-        if (step > 0) db = low + ((db - low) / step) * step;
-        data[0] = uint8_t(db);
-        data[1] = uint8_t(db >> 8);
-        return control(device, 0x21, 1, 0x200, index, data, 2) == 2;
+    void resetStats() {
+        peakSample = 0;
+        clippedSamples = 0;
+        anomalySamples = 0;
+        underruns = 0;
+        errors = 0;
+        feedbackCount = 0;
     }
 };
 
-Stream& stream(jlong handle) { return *reinterpret_cast<Stream*>(handle); }
+Stream& stream(jlong handle){ return *reinterpret_cast<Stream*>(handle); }
 
 void throwIo(JNIEnv* env, const std::exception& e) {
     env->ThrowNew(env->FindClass("java/io/IOException"), e.what());
@@ -504,11 +568,13 @@ extern "C" JNIEXPORT jstring JNICALL JNI_METHOD(probe)(JNIEnv* env, jobject, jin
 }
 
 extern "C" JNIEXPORT jlong JNICALL JNI_METHOD(open)(JNIEnv* env, jobject, jint fd,
-        jint rate, jint channels, jint bits) {
+        jint rate, jint channels, jint bits, jint buffer_ms,
+        jboolean channel_compat, jboolean bit_compat) {
     try {
         if (rate < 8000 || rate > 768000 || channels < 1 || channels > 32 ||
             (bits != 16 && bits != 24 && bits != 32)) throw std::runtime_error("Invalid PCM format");
-        return reinterpret_cast<jlong>(new Stream(fd, rate, channels, bits));
+        return reinterpret_cast<jlong>(new Stream(fd, rate, channels, bits, buffer_ms,
+                                                  channel_compat, bit_compat));
     } catch (const std::exception& e) {
         throwIo(env, e);
         return 0;
@@ -536,9 +602,12 @@ extern "C" JNIEXPORT jint JNICALL JNI_METHOD(write)(JNIEnv* env, jobject, jlong 
 
 extern "C" JNIEXPORT jlongArray JNICALL JNI_METHOD(stats)(JNIEnv* env, jobject, jlong handle) {
     const auto& s = stream(handle);
-    const jlong values[] = {s.submitted, s.completed, s.underruns, s.errors, s.feedbackCount, s.failure, s.volumeResult};
-    auto result = env->NewLongArray(7);
-    if (result) env->SetLongArrayRegion(result, 0, 7, values);
+    const jlong values[] = {s.submitted, s.completed, s.underruns, s.errors, s.feedbackCount,
+                            s.failure, s.volumeResult, jlong(s.queued / (s.inputFrame ? s.inputFrame : 1)),
+                            s.peakSample, s.clippedSamples, s.anomalySamples,
+                            s.volCurrent, s.volLow, s.volHigh, s.volStep, s.targetFrames};
+    auto result = env->NewLongArray(16);
+    if (result) env->SetLongArrayRegion(result, 0, 16, values);
     return result;
 }
 
@@ -552,11 +621,18 @@ extern "C" JNIEXPORT void JNICALL JNI_METHOD(drain)(JNIEnv*, jobject, jlong hand
     stream(handle).draining = true;
 }
 
-extern "C" JNIEXPORT jboolean JNICALL JNI_METHOD(volume)(JNIEnv*, jobject, jlong handle, jfloat gain) {
+extern "C" JNIEXPORT jboolean JNICALL JNI_METHOD(setVolumePercent)(JNIEnv*, jobject,
+        jlong handle, jfloat percent, jboolean smooth) {
     auto& s = stream(handle);
-    if (!std::isfinite(gain) || s.failure || s.controlClaimed < 0 || !masterFeature(s.chosen)) return false;
-    s.requestedVolume = std::clamp(gain, 0.0f, 1.0f);
+    if (!std::isfinite(percent) || s.failure || s.volumeResult <= 0) return false;
+    s.requestedVolumePercent = std::clamp(percent, 0.0f, 100.0f);
+    s.requestedVolumeSmooth = smooth;
     s.wake.notify_one();
+    return true;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL JNI_METHOD(resetStats)(JNIEnv*, jobject, jlong handle) {
+    stream(handle).resetStats();
     return true;
 }
 

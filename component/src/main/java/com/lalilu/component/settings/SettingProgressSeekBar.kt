@@ -1,24 +1,20 @@
 package com.lalilu.component.settings
 
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
-import androidx.compose.material.contentColorFor
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lalilu.component.base.ProgressSeekBar
-
+import kotlin.math.abs
 
 @Composable
 fun SettingProgressSeekBar(
@@ -29,45 +25,33 @@ fun SettingProgressSeekBar(
     subTitle: String? = null,
     valueRange: IntRange
 ) {
-    val tempValue = remember(value()) { mutableFloatStateOf(value()) }
-    val interactionSource = remember { MutableInteractionSource() }
-    val textColor = contentColorFor(backgroundColor = MaterialTheme.colors.background)
-
+    var tempValue by remember(value()) { mutableFloatStateOf(value()) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { }
-            )
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 18.dp, vertical = 11.dp),
+        horizontalAlignment = androidx.compose.ui.Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(
-            text = title,
-            color = textColor,
-            fontSize = 14.sp
-        )
-        ProgressSeekBar(
-            value = tempValue.floatValue,
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = title, color = SaltStyle.title, fontSize = 17.sp)
+            Text(
+                text = if (abs(tempValue - tempValue.toInt()) < 0.01f) "${tempValue.toInt()}"
+                else String.format("%.1f", tempValue),
+                color = SaltStyle.secondary,
+                fontSize = 15.sp
+            )
+        }
+        SaltSlider(
+            value = tempValue,
             onValueChange = {
-                tempValue.floatValue = it
+                tempValue = it
                 onValueUpdate(it)
             },
             valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
-            steps = valueRange.last - valueRange.first - 1,
-            onValueChangeFinished = { onFinishedUpdate(tempValue.floatValue) }
         )
         if (subTitle != null) {
-            Text(
-                text = subTitle,
-                fontSize = 12.sp,
-                color = contentColorFor(
-                    backgroundColor = MaterialTheme.colors.background
-                ).copy(0.5f)
-            )
+            Text(text = subTitle, fontSize = 12.sp, color = SaltStyle.secondary)
         }
     }
 }

@@ -25,7 +25,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lalilu.component.extension.enableFor
-import com.lalilu.component.lumo.components.Switch
 
 @Composable
 fun SettingSwitcher(
@@ -81,7 +80,7 @@ fun SettingSwitcher(
                 ),
                 text = title,
                 color = textColor,
-                fontSize = 14.sp
+                fontSize = 17.sp
             )
             if (subTitle != null) {
                 Text(
@@ -91,15 +90,14 @@ fun SettingSwitcher(
                     ),
                     text = subTitle,
                     fontSize = 12.sp,
-                    color = textColor.copy(0.5f)
+                    color = textColor.copy(0.52f)
                 )
             }
         },
-        contentEnd = { interaction ->
-            Switch(
+        contentEnd = {
+            SaltSwitch(
                 checked = state(),
                 onCheckedChange = { onStateUpdate(it) },
-                interactionSource = interaction,
             )
         }
     )
@@ -125,7 +123,7 @@ fun SettingSwitcher(
                     onClick = onContentStartClick
                 )
             }
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {

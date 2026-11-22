@@ -112,9 +112,9 @@ private fun SettingsScreen(
         contentPadding = PaddingValues(top = rememberFixedStatusBarHeightDp())
     ) {
         item {
-            NavigatorHeader(
+            SaltPageHeader(
                 title = stringResource(id = R.string.screen_title_settings),
-                subTitle = stringResource(id = R.string.destination_subtitle_settings)
+                subtitle = stringResource(id = R.string.destination_subtitle_settings),
             )
         }
 

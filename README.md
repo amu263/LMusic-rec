@@ -11,7 +11,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-111111?style=flat-square)](LICENSE)
 
-[下载 V0.1.0](https://github.com/amu263/LMusic-rec/releases/tag/v0.1.0) · [音频能力](docs/audio-and-lyrics.md) · [问题反馈](https://github.com/amu263/LMusic-rec/issues)
+[下载 V0.2.0](https://github.com/amu263/LMusic-rec/releases/tag/v0.2.0) · [音频能力](docs/audio-and-lyrics.md) · [问题反馈](https://github.com/amu263/LMusic-rec/issues)
 
 </div>
 
@@ -52,14 +52,14 @@
 
 ## 下载与安装
 
-1. 打开 [Releases](https://github.com/amu263/LMusic-rec/releases/tag/v0.1.0)，下载 `LMusic-0.1.0.apk`。
+1. 打开 [Releases](https://github.com/amu263/LMusic-rec/releases/tag/v0.2.0)，下载 `LMusic-0.2.0.apk`。
 2. Android 允许“安装未知来源应用”后安装。
 3. 首次启动授予本地音频读取权限，LMusic 会扫描设备中的音乐。
 
 **系统要求**：Android 5.0（API 21）及以上。  
 **架构**：arm64-v8a / armeabi-v7a / x86_64；USB 独占原生驱动当前为 arm64-v8a。
 
-> V0.1 使用独立发布签名。若你之前安装过开发版，请先卸载再安装正式版。
+> V0.2 使用独立发布签名。若你之前安装过其他签名的版本，请先卸载再安装正式版。
 
 ## 适合谁
 
@@ -70,11 +70,11 @@
 
 ## LMusic Pro
 
-V0.1 先把手艺做扎实：高解析输出、USB 独占、逐字歌词与 Monet 界面全部开放体验。
+V0.2 先把手艺做扎实：高解析输出、USB 独占、逐字歌词与 Monet 界面全部开放体验。
 
 后续 Pro 将围绕更深度的音频与资料库能力展开，例如：
 
-- 更完整的 UAC 设备兼容与硬件音量控制；
+- 更完整的 UAC 设备兼容、硬件音量与安全音量策略；
 - 多设备音频配置、房间/耳机预设；
 - 歌词与元数据批量整理、云备份；
 - 面向音乐收藏者的高级资料库工具。

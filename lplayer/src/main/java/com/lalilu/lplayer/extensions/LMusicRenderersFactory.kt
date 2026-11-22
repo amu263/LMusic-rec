@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import com.lalilu.lplayer.audio.AudioSettings
+import com.lalilu.lplayer.usb.UsbAudioSettings
 import com.lalilu.lplayer.usb.UsbBitPerfectAudioSink
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegAudioRenderer
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegLibrary
@@ -92,7 +93,9 @@ class LMusicRenderersFactory(
             audioSink,
             preferFloatOutput,
         ) {
+            val usbBits = if (AudioSettings.usbBitPerfect) UsbAudioSettings.bitDepth else 0
             val bits = when {
+                usbBits == 16 || usbBits == 24 -> usbBits
                 AudioSettings.outputBitDepth == AudioSettings.BIT_DEPTH_24 -> 24
                 AudioSettings.outputBitDepth == AudioSettings.BIT_DEPTH_FLOAT -> 32
                 else -> 16

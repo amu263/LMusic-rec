@@ -30,7 +30,23 @@ class UsbAudioSession private constructor(
         val feedbackPackets: Long,
         val error: Int,
         val hardwareVolumeResult: Int, // 0: untouched, 1: applied, -1: rejected by DAC
-    )
+        val queuedFrames: Long = 0,
+        val peakSample: Long = 0,
+        val clippedSamples: Long = 0,
+        val anomalySamples: Long = 0,
+        val volumeRaw: Int = 0,
+        val volumeMinRaw: Int = 0,
+        val volumeMaxRaw: Int = 0,
+        val volumeStepRaw: Int = 0,
+        val targetFrames: Long = 0,
+    ) {
+        val hardwareVolumeAvailable: Boolean get() = hardwareVolumeResult > 0
+        val hardwareVolumeDb: Float get() = volumeRaw / 256f
+        val volumePercent: Int
+            get() = if (volumeMaxRaw > volumeMinRaw) {
+                ((volumeRaw - volumeMinRaw) * 100 / (volumeMaxRaw - volumeMinRaw)).coerceIn(0, 100)
+            } else 0
+    }
 
     val configuration: String = UsbNative.configuration(handle)
 
@@ -48,14 +64,35 @@ class UsbAudioSession private constructor(
 
     fun status(): Status {
         val stats = UsbNative.stats(openHandle())
-        return Status(configuration, stats[0], stats[1], stats[2], stats[3], stats[4], stats[5].toInt(), stats[6].toInt())
+        return Status(
+            configuration = configuration,
+            framesWritten = stats[0],
+            framesTransferred = stats[1],
+            underrunPackets = stats[2],
+            transferErrors = stats[3],
+            feedbackPackets = stats[4],
+            error = stats[5].toInt(),
+            hardwareVolumeResult = stats[6].toInt(),
+            queuedFrames = stats[7],
+            peakSample = stats[8],
+            clippedSamples = stats[9],
+            anomalySamples = stats[10],
+            volumeRaw = stats[11].toInt(),
+            volumeMinRaw = stats[12].toInt(),
+            volumeMaxRaw = stats[13].toInt(),
+            volumeStepRaw = stats[14].toInt(),
+            targetFrames = stats[15],
+        )
     }
 
     /** Delivers a snapshot on the owning thread. */
     fun publishStatus() = status().also(onStatus)
 
-    /** Queues a master Feature Unit hardware-volume request if available. */
-    fun setVolume(gain: Float): Boolean = UsbNative.volume(openHandle(), gain)
+    /** Sets the DAC master Feature Unit volume, 0..100% of its hardware range. */
+    fun setVolumePercent(percent: Int, smooth: Boolean = true): Boolean =
+        UsbNative.setVolumePercent(openHandle(), percent.coerceIn(0, 100).toFloat(), smooth)
+
+    fun resetStats() = UsbNative.resetStats(openHandle())
     fun start() = UsbNative.run(openHandle(), true)
     fun stop() = UsbNative.run(openHandle(), false)
     fun drain() = UsbNative.drain(openHandle())
@@ -95,12 +132,23 @@ class UsbAudioSession private constructor(
             manager: UsbManager,
             device: UsbDevice,
             format: Pcm,
+            bufferMs: Int = 600,
+            channelCompatibility: Boolean = true,
+            bitDepthCompatibility: Boolean = true,
             onStatus: (Status) -> Unit = {},
         ): UsbAudioSession {
             val connection = connect(manager, device)
             var handle = 0L
             try {
-                handle = UsbNative.open(connection.fileDescriptor, format.sampleRate, format.channels, format.bits)
+                handle = UsbNative.open(
+                    connection.fileDescriptor,
+                    format.sampleRate,
+                    format.channels,
+                    format.bits,
+                    bufferMs,
+                    channelCompatibility,
+                    bitDepthCompatibility,
+                )
                 return UsbAudioSession(connection, handle, format, onStatus).also { it.publishStatus() }
             } catch (failure: Throwable) {
                 if (handle != 0L) UsbNative.close(handle)
@@ -120,12 +168,21 @@ internal object UsbNative {
     init { System.loadLibrary("usbuac") }
 
     external fun probe(fd: Int): String
-    external fun open(fd: Int, rate: Int, channels: Int, bits: Int): Long
+    external fun open(
+        fd: Int,
+        rate: Int,
+        channels: Int,
+        bits: Int,
+        bufferMs: Int,
+        channelCompatibility: Boolean,
+        bitDepthCompatibility: Boolean,
+    ): Long
     external fun configuration(handle: Long): String
     external fun write(handle: Long, buffer: ByteBuffer, offset: Int, frames: Int): Int
     external fun stats(handle: Long): LongArray
     external fun run(handle: Long, play: Boolean)
     external fun drain(handle: Long)
-    external fun volume(handle: Long, gain: Float): Boolean
+    external fun setVolumePercent(handle: Long, percent: Float, smooth: Boolean): Boolean
+    external fun resetStats(handle: Long): Boolean
     external fun close(handle: Long)
 }

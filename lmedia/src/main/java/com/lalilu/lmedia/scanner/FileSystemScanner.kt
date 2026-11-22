@@ -191,10 +191,12 @@ class FileSystemScanner(
                 if (!fileSource.canRead() || fileSource.isDirectory()) return@async null
                 if (!isSupportedAudio(fileSource)) return@async null
 
-                val pathStr = when (fileSource) {
+                val rawPath = when (fileSource) {
                     is FileSource.Document -> fileSource.file.uri.toString()
                     is FileSource.IOFile -> fileSource.file.absolutePath
-                }.let { URLDecoder.decode(it, "UTF-8") }
+                }
+                val pathStr = runCatching { URLDecoder.decode(rawPath, "UTF-8") }
+                    .getOrDefault(rawPath)
 
                 val directoryPath = FileUtils.getDirName(pathStr)
                     ?.takeIf(String::isNotEmpty)

@@ -1,28 +1,30 @@
 package com.lalilu.component.settings
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.DropdownMenu
+import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.material.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lalilu.component.base.StateSeekBar
-import kotlin.math.roundToInt
 
 @Composable
 fun SettingStateSeekBar(
@@ -30,7 +32,7 @@ fun SettingStateSeekBar(
     selection: List<String>,
     @StringRes titleRes: Int,
     @StringRes subTitleRes: Int? = null,
-    paddingValues: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+    paddingValues: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 13.dp)
 ) = SettingStateSeekBar(
     state = state,
     selection = selection,
@@ -45,7 +47,7 @@ fun SettingStateSeekBar(
     selection: List<String>,
     title: String,
     subTitle: String? = null,
-    paddingValues: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+    paddingValues: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 13.dp)
 ) = SettingStateSeekBar(
     state = { state.value },
     onStateUpdate = { state.value = it },
@@ -62,45 +64,38 @@ fun SettingStateSeekBar(
     selection: List<String>,
     title: String,
     subTitle: String? = null,
-    paddingValues: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+    paddingValues: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 13.dp)
 ) {
-    val tempValue = remember(state()) { mutableStateOf(state().toFloat()) }
-    val interactionSource = remember { MutableInteractionSource() }
+    var expanded by remember { mutableStateOf(false) }
     val textColor = contentColorFor(backgroundColor = MaterialTheme.colors.background)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { }
-            )
-            .padding(paddingValues),
-        horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = title,
-            color = textColor,
-            fontSize = 14.sp
-        )
-        StateSeekBar(
-            value = tempValue.value,
-            steps = selection.size - 2,
-            selections = selection,
-            onValueChange = { tempValue.value = it },
-            valueRange = 0f..(selection.size - 1f),
-            onValueChangeFinished = { onStateUpdate(tempValue.value.roundToInt()) }
-        )
-        if (subTitle != null) {
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+                .padding(paddingValues),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, color = textColor, fontSize = 17.sp)
+                if (subTitle != null) Text(subTitle, fontSize = 12.sp, color = SaltStyle.secondary)
+            }
             Text(
-                text = subTitle,
-                fontSize = 12.sp,
-                color = contentColorFor(
-                    backgroundColor = MaterialTheme.colors.background
-                ).copy(0.5f)
+                text = selection.getOrElse(state().coerceIn(0, selection.lastIndex)) { "" } + "  ⌄",
+                color = SaltStyle.secondary,
+                fontSize = 15.sp,
             )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            selection.forEachIndexed { index, label ->
+                DropdownMenuItem(onClick = {
+                    onStateUpdate(index)
+                    expanded = false
+                }) {
+                    Text(label, fontSize = 15.sp)
+                }
+            }
         }
     }
 }
