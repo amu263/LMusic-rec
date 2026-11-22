@@ -56,7 +56,7 @@ SPL 行内逐字/逐词时间戳、翻译、延迟首字、显式行结尾；支
 ## 校验
 
 ```text
-SHA-256: 84f9e675388c672fa8faee4646491d81fe07356fbe18c29a3dea5ab7a5183a91
+SHA-256: 9d07ee4190bece43b985d7c72c1aa740f0dd1c6b30a62f2d20ef9df40e612f0e
 ```
 
 ## 反馈
