@@ -348,11 +348,12 @@ struct Stream {
     }
 
     void acceptFeedback(const uint8_t* data, unsigned length) {
-        double value;
-        if (length == 4) value = little(data, 4) / 65536.0;
-        else if (length == 3 && baseHz == 1000) value = little(data, 3) / 16384.0;
+        uint32_t raw;
+        if (length == 4) raw = little(data, 4);
+        else if (length == 3 && baseHz == 1000) raw = little(data, 3) << 2;
         else return;
-        value *= periods;
+        // UAC2 reports samples per 1 ms USB frame (16.16); convert to per-packet.
+        double value = feedbackSamplesPerPacket(raw, periods, baseHz);
         if (value >= nominal * 0.97 && value <= nominal * 1.03 &&
             std::ceil(value) * outputFrame <= chosen.packet) {
             framesPerPacket = value;

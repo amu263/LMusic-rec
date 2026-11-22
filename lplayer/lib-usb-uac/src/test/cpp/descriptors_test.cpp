@@ -107,7 +107,19 @@ void uac1Continuous() {
 }
 }
 
+void feedbackUnits() {
+    // 48 kHz at high speed: 48 samples/frame -> 6 samples per 125 us packet.
+    assert(feedbackSamplesPerPacket(48 << 16, 1, 8000) > 5.999);
+    assert(feedbackSamplesPerPacket(48 << 16, 1, 8000) < 6.001);
+    // Full speed: one packet per frame.
+    assert(feedbackSamplesPerPacket(48 << 16, 1, 1000) > 47.999);
+    assert(feedbackSamplesPerPacket(44 << 16, 1, 1000) > 43.999);
+    // bInterval=2 high speed: two 125 us packets per frame.
+    assert(feedbackSamplesPerPacket(48 << 16, 2, 8000) > 11.999);
+}
+
 int main() {
     uac2Composite();
     uac1Continuous();
+    feedbackUnits();
 }

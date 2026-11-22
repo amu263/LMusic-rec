@@ -165,3 +165,8 @@ std::string describe(const AudioAlt& alt) {
     else for (int rate : alt.rates) out << " " << rate << "Hz";
     return out.str();
 }
+
+double feedbackSamplesPerPacket(uint32_t raw, int periods, int baseHz) {
+    if (baseHz <= 0) return 0.0;
+    return (raw / 65536.0) * periods * 1000.0 / baseHz;
+}

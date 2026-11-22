@@ -18,3 +18,7 @@ struct AudioAlt {
 unsigned little(const uint8_t* bytes, int size);
 std::vector<AudioAlt> parseAudio(const libusb_config_descriptor& config);
 std::string describe(const AudioAlt& alt);
+
+// Converts a 16.16 UAC feedback value (samples per 1 ms USB frame) to samples per
+// isochronous packet for a high-/full-speed endpoint.
+double feedbackSamplesPerPacket(uint32_t raw, int periods, int baseHz);
