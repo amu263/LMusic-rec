@@ -1,40 +1,123 @@
+<div align="center">
+
 # LMusic
 
-#### 介绍
-一个简洁且独特的音乐播放器，遵循最小权限原则，目标是打造一个简洁好用的音乐播放器，还要够方便够好用。
+**把本地音乐，听回它本来的样子。**
 
-在其中学习使用了MVVM架构，现已从传统View架构转为Compose架构，大量使用了Kotlin Coroutines Flow、协程，以用来形成单向数据流。
+全格式 · 高解析 · 逐字歌词 · 本地优先
 
+[![Release](https://img.shields.io/github/v/release/amu263/LMusic-rec?style=flat-square&color=111111)](https://github.com/amu263/LMusic-rec/releases)
+[![Android](https://img.shields.io/badge/Android-5.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](https://github.com/amu263/LMusic-rec/releases)
+[![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-111111?style=flat-square)](LICENSE)
 
-|![APP主页面](https://gitee.com/lalilu/lmusic/raw/master/screenshots/202205112338172.png "主页面")主页面|![歌词页](https://gitee.com/lalilu/lmusic/raw/master/screenshots/20220511233817.jpg "歌词页")歌词页|
-|--|--|
-|![歌曲页](https://gitee.com/lalilu/lmusic/raw/master/screenshots/202205112338171.jpg "歌曲页")歌曲页|![专辑页](https://gitee.com/lalilu/lmusic/raw/master/screenshots/202205112338171.png "专辑页")专辑页|
+[下载 V0.1.0](https://github.com/amu263/LMusic-rec/releases/tag/v0.1.0) · [音频能力](docs/audio-and-lyrics.md) · [问题反馈](https://github.com/amu263/LMusic-rec/issues)
 
-##### Tips
-在这个项目中尝试过自定义View，也尝试修改Google的Material库以获得满足目标的效果，但大部分都已经用Compose重新实现了，需要看旧的传统View的实现请查阅v1.4.9以前版本的代码。
+</div>
 
-#### 功能增强（1.6.0）
+---
 
-- 全格式音频软解：APE、DSD（DSF/DFF）、WMA、WavPack、TTA、TAK、AIFF、ALAC 等，硬件优先、FFmpeg 自动接管，也可强制仅软解。
-- 音频输出：采样率/位深选择（16-bit / 32-bit float / 24-bit packed）、32-tap sinc 重采样、DSD 增益、10 段均衡器、无间隙播放。
-- USB 音频：AudioTrack 直连（兼容）与基于 libusb UAC 等时传输的 bit-perfect 独占（实验性，Pro）；已在 MOONDROP Dawn Pro 上验证 16-bit/44.1 与 24-bit/44.1-192 kHz。
-- SPL 逐字歌词：行内逐字/逐词时间戳、`<>` 延迟首字、翻译、显式行结尾、`.spl`/`.lrc` 外挂歌词。
-- 视觉：首页头条与播放条使用毛玻璃 + Monet 取色流光文字，保持原有布局与交互。
-- 详细说明见 [`docs/audio-and-lyrics.md`](docs/audio-and-lyrics.md)。
+## 为什么是 LMusic
 
-#### Build 指南
-1. clone 本仓库
-2. 准备 Android SDK（compileSdk 35）与 NDK 26.1.10909125
-3. 直接执行 `./gradlew :app:assembleDebug`
+大多数播放器在“能播”之后就不再向前。LMusic 想解决的是另一件事：**让本地收藏里的每一种格式、每一层动态、每一句歌词，都被认真对待。**
 
-`lmedia` 及其 `taglib`/`utfcpp` 依赖已作为普通源码包含在仓库中，不再需要 `git submodule`。
-`lplayer/lib-ffmpeg` 已包含 arm64-v8a / armeabi-v7a / x86_64 的预编译 `libmedia3ext.so`；重新生成 FFmpeg 见 `tools/build_ffmpeg_android.sh`。
+没有广告，没有强制登录，没有云端曲库绑架。你的音乐留在你的设备里，LMusic 只负责把它放好。
 
-#### 参与贡献
-欢迎提Issues和PR，你的Issues就是我最大的动力，你的PR是对我最大的支持，十分感谢！！！
+## 核心能力
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+| | |
+|---|---|
+| **全格式播放** | APE、DSD（DSF/DFF）、WMA、WavPack、TTA、TAK、AIFF、ALAC、FLAC、MP3、AAC、WAV、OGG、Opus。硬件优先，FFmpeg 自动接管。 |
+| **高解析输出** | 16-bit / 32-bit float / 24-bit packed，自动或手动采样率，32-tap sinc 重采样。 |
+| **USB 音频** | AudioTrack 直连兼容模式；基于 libusb UAC 等时传输的 bit-perfect 独占，支持 UAC2 异步反馈与采样率控制。 |
+| **逐字歌词** | SPL 行内逐字/逐词时间戳、翻译、延迟首字、显式行结尾，支持 `.spl` / `.lrc` 外挂。 |
+| **Monet 视觉** | 毛玻璃播放条与首页头条，封面取色 + 黑白流光，文字随封面调色。 |
+| **本地优先** | 只申请必要权限，不上传歌单与播放记录。 |
 
+## 截图
+
+<div align="center">
+
+| 播放页 | 歌词页 |
+|:---:|:---:|
+| ![播放页](screenshots/202205112338172.png) | ![歌词页](screenshots/20220511233817.jpg) |
+
+| 歌曲库 | 专辑 |
+|:---:|:---:|
+| ![歌曲库](screenshots/202205112338171.jpg) | ![专辑](screenshots/202205112338173.png) |
+
+</div>
+
+> 截图为界面预览，实际样式以当前版本为准。
+
+## 下载与安装
+
+1. 打开 [Releases](https://github.com/amu263/LMusic-rec/releases/tag/v0.1.0)，下载 `LMusic-0.1.0.apk`。
+2. Android 允许“安装未知来源应用”后安装。
+3. 首次启动授予本地音频读取权限，LMusic 会扫描设备中的音乐。
+
+**系统要求**：Android 5.0（API 21）及以上。  
+**架构**：arm64-v8a / armeabi-v7a / x86_64；USB 独占原生驱动当前为 arm64-v8a。
+
+> V0.1 使用独立发布签名。若你之前安装过开发版，请先卸载再安装正式版。
+
+## 适合谁
+
+- 本地曲库里有大量 FLAC、DSD、APE 的收藏型用户；
+- 使用 USB DAC / 小尾巴，希望绕过系统混音与重采样的用户；
+- 在意逐字歌词、界面质感和隐私的日常听众；
+- 想要一个“打开就能听”，而不是先注册账号的播放器的人。
+
+## LMusic Pro
+
+V0.1 先把手艺做扎实：高解析输出、USB 独占、逐字歌词与 Monet 界面全部开放体验。
+
+后续 Pro 将围绕更深度的音频与资料库能力展开，例如：
+
+- 更完整的 UAC 设备兼容与硬件音量控制；
+- 多设备音频配置、房间/耳机预设；
+- 歌词与元数据批量整理、云备份；
+- 面向音乐收藏者的高级资料库工具。
+
+商业合作、定制与分发咨询请通过 [Issues](https://github.com/amu263/LMusic-rec/issues) 联系。
+
+## 构建
+
+```bash
+# 需要 JDK 17、Android SDK 35、NDK 26.1.10909125
+./gradlew :app:assembleDebug
+```
+
+发布 APK：
+
+```bash
+./gradlew :app:assembleRelease
+```
+
+仓库已内置 `lmedia`、`taglib`、`utfcpp` 与各 ABI 的 FFmpeg JNI 库，无需初始化子模块。USB UAC 原生库可用 `lplayer/lib-usb-uac/build-native.sh` 重建。
+
+## 文档
+
+- [音频输出、USB 独占与逐字歌词](docs/audio-and-lyrics.md)
+- [USB UAC 模块说明](lplayer/lib-usb-uac/README.md)
+
+## 反馈
+
+遇到播放异常、USB DAC 兼容问题或想提功能建议，请附上：
+
+- 设备型号与 Android 版本；
+- 音频格式 / 采样率 / 位深；
+- DAC 型号（USB 问题）；
+- `adb logcat` 中 `UsbAudioOutput` 相关日志。
+
+## 致谢
+
+LMusic 站在许多开源项目之上：Media3 / ExoPlayer、FFmpeg、TagLib、libusb、Kotlin、Jetpack Compose、Koin、Voyager、Room、Coil 等。
+
+感谢每一位提交 Issue、PR 和反馈听感的用户。
+
+## License
+
+[AGPL-3.0](LICENSE)
+
+LMusic 允许个人使用、学习与修改；基于本项目的分发需遵循 AGPL-3.0。第三方组件遵循各自许可证。

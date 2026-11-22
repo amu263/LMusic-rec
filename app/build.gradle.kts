@@ -48,8 +48,8 @@ android {
         applicationId = "com.lalilu.lmusic"
         minSdk = libs.versions.min.sdk.version.get().toIntOrNull()
         targetSdk = libs.versions.compile.version.get().toIntOrNull()
-        versionCode = 43
-        versionName = "1.6.0"
+        versionCode = 44
+        versionName = "0.1.0"
 
         vectorDrawables {
             useSupportLibrary = true

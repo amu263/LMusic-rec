@@ -43,11 +43,6 @@ object UsbAudioManager {
             }
     }
 
-    fun findDeviceById(context: Context, id: String?): Device? {
-        if (id.isNullOrBlank()) return null
-        return listDevices(context).firstOrNull { it.id == id }
-    }
-
     fun selectExclusiveDevice(devices: List<Device>, id: String?): Device? {
         if (id.isNullOrBlank()) return devices.singleOrNull()
         return devices.firstOrNull { it.id == id }
@@ -60,8 +55,6 @@ object UsbAudioManager {
             .filter { hasAudioOutput(it) }
             .map { describe(context, it) }
     }
-
-    fun describe(device: UsbDevice): Device = describe(null, device)
 
     fun describe(context: Context?, device: UsbDevice): Device {
         val rates = mutableSetOf<Int>()

@@ -46,8 +46,6 @@ class UsbAudioSession private constructor(
         return count
     }
 
-    fun getPositionFrames(): Long = status().framesTransferred
-
     fun status(): Status {
         val stats = UsbNative.stats(openHandle())
         return Status(configuration, stats[0], stats[1], stats[2], stats[3], stats[4], stats[5].toInt(), stats[6].toInt())

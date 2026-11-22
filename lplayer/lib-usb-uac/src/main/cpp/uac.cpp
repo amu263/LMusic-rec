@@ -356,7 +356,7 @@ struct Stream {
         // DACs disagree on whether UAC2 feedback is expressed per 125 us packet or per
         // 1 ms USB frame. Accept either convention when it is close to our nominal size.
         const double perPacket = rawValue;
-        const double perFrame = rawValue * periods * 1000.0 / baseHz;
+        const double perFrame = feedbackSamplesPerPacket(raw, periods, baseHz);
         double value = 0.0;
         if (std::abs(perPacket - nominal) <= nominal * 0.03) value = perPacket;
         else if (std::abs(perFrame - nominal) <= nominal * 0.03) value = perFrame;
