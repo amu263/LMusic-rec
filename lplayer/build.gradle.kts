@@ -32,6 +32,7 @@ dependencies {
 
     api(project(":lplayer:lib-decoder-flac"))
     api(project(":lplayer:lib-ffmpeg"))
+    api(project(":lplayer:lib-usb-uac"))
     api(libs.bundles.media3)
     api("com.github.cy745:fpcalc:1.2")
 

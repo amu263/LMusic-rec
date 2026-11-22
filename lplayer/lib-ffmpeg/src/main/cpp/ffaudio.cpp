@@ -33,29 +33,19 @@ static const int AUDIO_DECODER_ERROR_OTHER = -2;
 
 static jmethodID growOutputBufferMethod;
 
+int transformError(int errorNumber);
+
 
 /**
  * Allocates and opens a new AVCodecContext for the specified codec, passing the
  * provided extraData as initialization data for the decoder if it is non-NULL.
  * Returns the created context.
  */
-AVCodecContext *createContext(JNIEnv *env, AVCodec *codec, jbyteArray extraData,
-                              jboolean outputFloat, jint rawSampleRate,
-                              jint rawChannelCount);
-
 /**
  * Decodes the packet into the output buffer, returning the number of bytes
  * written, or a negative AUDIO_DECODER_ERROR constant value in the case of an
  * error.
  */
-int decodePacket(AVCodecContext *context, AVPacket *packet,
-                 uint8_t *outputBuffer, int outputSize);
-
-/**
- * Transforms ffmpeg AVERROR into a negative AUDIO_DECODER_ERROR constant value.
- */
-int transformError(int errorNumber);
-
 struct GrowOutputBufferCallback {
     uint8_t *operator()(int requiredSize) const;
 
@@ -77,14 +67,15 @@ uint8_t *GrowOutputBufferCallback::operator()(int requiredSize) const {
 AVCodecContext *createContext(JNIEnv *env, AVCodec *codec, jbyteArray extraData,
                               jboolean outputFloat, jint rawSampleRate,
                               jint rawChannelCount, jint bitsPerCodedSample,
-                              jint blockAlign, jint bitRate) {
+                              jint blockAlign, jint bitRate, jint outputBits) {
     AVCodecContext *context = avcodec_alloc_context3(codec);
     if (!context) {
         LOGE("Failed to allocate context.");
         return nullptr;
     }
     context->request_sample_fmt =
-            outputFloat ? OUTPUT_FORMAT_PCM_FLOAT : OUTPUT_FORMAT_PCM_16BIT;
+            outputBits == 24 ? AV_SAMPLE_FMT_S32 :
+            (outputFloat ? OUTPUT_FORMAT_PCM_FLOAT : OUTPUT_FORMAT_PCM_16BIT);
     if (extraData) {
         jsize size = env->GetArrayLength(extraData);
         context->extradata_size = size;
@@ -97,25 +88,14 @@ AVCodecContext *createContext(JNIEnv *env, AVCodec *codec, jbyteArray extraData,
         }
         env->GetByteArrayRegion(extraData, 0, size, (jbyte *) context->extradata);
     }
-    // Many decoders (notably DSD, PCM and lossless formats) do not populate a sample
-    // rate / channel layout from the bitstream alone. Seed them from the container so
-    // swresample can be configured even before the first decoded frame.
-    if (rawSampleRate > 0) {
-        context->sample_rate = rawSampleRate;
-    }
-    if (rawChannelCount > 0) {
-        av_channel_layout_default(&context->ch_layout, rawChannelCount);
-    }
+    if (rawSampleRate > 0) context->sample_rate = rawSampleRate;
+    if (rawChannelCount > 0) av_channel_layout_default(&context->ch_layout, rawChannelCount);
     if (bitsPerCodedSample > 0) {
         context->bits_per_coded_sample = bitsPerCodedSample;
         context->bits_per_raw_sample = bitsPerCodedSample;
     }
-    if (blockAlign > 0) {
-        context->block_align = blockAlign;
-    }
-    if (bitRate > 0) {
-        context->bit_rate = bitRate;
-    }
+    if (blockAlign > 0) context->block_align = blockAlign;
+    if (bitRate > 0) context->bit_rate = bitRate;
     context->err_recognition = AV_EF_IGNORE_ERR;
     int result = avcodec_open2(context, codec, nullptr);
     if (result < 0) {
@@ -128,15 +108,12 @@ AVCodecContext *createContext(JNIEnv *env, AVCodec *codec, jbyteArray extraData,
 
 int decodePacket(AVCodecContext *context, AVPacket *packet,
                  uint8_t *outputBuffer, int outputSize, GrowOutputBufferCallback growBuffer) {
-    int result = 0;
-    // Queue input data.
-    result = avcodec_send_packet(context, packet);
+    int result = avcodec_send_packet(context, packet);
     if (result) {
         logError("avcodec_send_packet", result);
         return transformError(result);
     }
 
-    // Dequeue output data until it runs out.
     int outSize = 0;
     while (true) {
         AVFrame *frame = av_frame_alloc();
@@ -147,52 +124,59 @@ int decodePacket(AVCodecContext *context, AVPacket *packet,
         result = avcodec_receive_frame(context, frame);
         if (result) {
             av_frame_free(&frame);
-            if (result == AVERROR(EAGAIN)) {
-                break;
-            }
+            if (result == AVERROR(EAGAIN)) break;
             logError("avcodec_receive_frame", result);
             return transformError(result);
         }
 
-        // Resample output.
         AVSampleFormat sampleFormat = context->sample_fmt;
         int channelCount = context->ch_layout.nb_channels;
         AVChannelLayout channelLayout = context->ch_layout;
         int sampleRate = context->sample_rate;
         int sampleCount = frame->nb_samples;
-        int dataSize = av_samples_get_buffer_size(nullptr, channelCount, sampleCount,
-                                                  sampleFormat, 1);
-        SwrContext *resampleContext;
-        if (context->opaque) {
-            resampleContext = (SwrContext *) context->opaque;
-        } else {
-            resampleContext = swr_alloc();
-            av_opt_set_chlayout(resampleContext, "in_chlayout", &channelLayout, 0);
-            av_opt_set_chlayout(resampleContext, "out_chlayout", &channelLayout, 0);
-            av_opt_set_int(resampleContext, "in_sample_rate", sampleRate, 0);
-            av_opt_set_int(resampleContext, "out_sample_rate", sampleRate, 0);
-            av_opt_set_int(resampleContext, "in_sample_fmt", sampleFormat, 0);
-            // The output format is always the requested format.
-            av_opt_set_int(resampleContext, "out_sample_fmt",
-                           context->request_sample_fmt, 0);
-            result = swr_init(resampleContext);
+        if (channelCount <= 0 || sampleCount <= 0) {
+            av_frame_free(&frame);
+            continue;
+        }
+
+        auto *resampler = (AudioResampler *) context->opaque;
+        if (!resampler) {
+            resampler = (AudioResampler *) av_mallocz(sizeof(AudioResampler));
+            if (!resampler) {
+                av_frame_free(&frame);
+                return AUDIO_DECODER_ERROR_OTHER;
+            }
+            resampler->swr = swr_alloc();
+            resampler->outputBits = context->request_sample_fmt == AV_SAMPLE_FMT_S32 ? 24 : 0;
+            context->opaque = resampler;
+            av_opt_set_chlayout(resampler->swr, "in_chlayout", &channelLayout, 0);
+            av_opt_set_chlayout(resampler->swr, "out_chlayout", &channelLayout, 0);
+            av_opt_set_int(resampler->swr, "in_sample_rate", sampleRate, 0);
+            av_opt_set_int(resampler->swr, "out_sample_rate", sampleRate, 0);
+            av_opt_set_int(resampler->swr, "in_sample_fmt", sampleFormat, 0);
+            av_opt_set_int(resampler->swr, "out_sample_fmt", context->request_sample_fmt, 0);
+            result = swr_init(resampler->swr);
             if (result < 0) {
                 logError("swr_init", result);
                 av_frame_free(&frame);
                 return transformError(result);
             }
-            context->opaque = resampleContext;
         }
-        int inSampleSize = av_get_bytes_per_sample(sampleFormat);
-        int outSampleSize = av_get_bytes_per_sample(context->request_sample_fmt);
-        int outSamples = swr_get_out_samples(resampleContext, sampleCount);
-        int bufferOutSize = outSampleSize * channelCount * outSamples;
-        if (outSize + bufferOutSize > outputSize) {
-            LOGD(
-                    "Output buffer size (%d) too small for output data (%d), "
-                    "reallocating buffer.",
-                    outputSize, outSize + bufferOutSize);
-            outputSize = outSize + bufferOutSize;
+
+        int outSamples = swr_get_out_samples(resampler->swr, sampleCount);
+        if (outSamples <= 0) {
+            av_frame_free(&frame);
+            continue;
+        }
+        bool packed24 = resampler->outputBits == 24;
+        int outBytesPerSample = packed24 ? 3
+                : av_get_bytes_per_sample(context->request_sample_fmt);
+        int packedBytes = outBytesPerSample * channelCount * outSamples;
+
+        if (outSize + packedBytes > outputSize) {
+            LOGD("Output buffer size (%d) too small for output data (%d), reallocating buffer.",
+                 outputSize, outSize + packedBytes);
+            outputSize = outSize + packedBytes;
             outputBuffer = growBuffer(outputSize);
             if (!outputBuffer) {
                 LOGE("Failed to reallocate output buffer.");
@@ -200,21 +184,53 @@ int decodePacket(AVCodecContext *context, AVPacket *packet,
                 return AUDIO_DECODER_ERROR_OTHER;
             }
         }
-        result = swr_convert(resampleContext, &outputBuffer, bufferOutSize,
-                             (const uint8_t **) frame->data, frame->nb_samples);
+
+        int converted;
+        if (packed24) {
+            // swresample writes 32-bit samples; pack the high 24 bits into little-endian
+            // three-byte slots expected by ENCODING_PCM_24BIT_PACKED.
+            int tempSize = 4 * channelCount * outSamples;
+            auto *temp = (uint8_t *) av_malloc(tempSize);
+            if (!temp) {
+                av_frame_free(&frame);
+                return AUDIO_DECODER_ERROR_OTHER;
+            }
+            uint8_t *tempPtr = temp;
+            converted = swr_convert(resampler->swr, &tempPtr, outSamples,
+                                    (const uint8_t **) frame->data, frame->nb_samples);
+            if (converted < 0) {
+                logError("swr_convert", converted);
+                av_free(temp);
+                av_frame_free(&frame);
+                return transformError(converted);
+            }
+            uint8_t *dst = outputBuffer + outSize;
+            auto *src = (const int32_t *) temp;
+            for (int i = 0; i < converted * channelCount; i++) {
+                int32_t value = src[i] >> 8;
+                dst[i * 3] = (uint8_t) (value & 0xff);
+                dst[i * 3 + 1] = (uint8_t) ((value >> 8) & 0xff);
+                dst[i * 3 + 2] = (uint8_t) ((value >> 16) & 0xff);
+            }
+            av_free(temp);
+        } else {
+            uint8_t *dst = outputBuffer + outSize;
+            converted = swr_convert(resampler->swr, &dst, outSamples,
+                                    (const uint8_t **) frame->data, frame->nb_samples);
+            if (converted < 0) {
+                logError("swr_convert", converted);
+                av_frame_free(&frame);
+                return transformError(converted);
+            }
+        }
         av_frame_free(&frame);
-        if (result < 0) {
-            logError("swr_convert", result);
-            return AUDIO_DECODER_ERROR_INVALID_DATA;
-        }
-        int available = swr_get_out_samples(resampleContext, 0);
+
+        int available = swr_get_out_samples(resampler->swr, 0);
         if (available != 0) {
-            LOGE("Expected no samples remaining after resampling, but found %d.",
-                 available);
+            LOGE("Expected no samples remaining after resampling, but found %d.", available);
             return AUDIO_DECODER_ERROR_INVALID_DATA;
         }
-        outputBuffer += bufferOutSize;
-        outSize += bufferOutSize;
+        outSize += outBytesPerSample * channelCount * converted;
     }
     return outSize;
 }
@@ -235,7 +251,8 @@ Java_io_github_anilbeesetti_nextlib_media3ext_ffdecoder_FfmpegAudioDecoder_ffmpe
                                                                         jint raw_channel_count,
                                                                         jint bits_per_coded_sample,
                                                                         jint block_align,
-                                                                        jint bit_rate) {
+                                                                        jint bit_rate,
+                                                                        jint output_bits) {
     AVCodec *codec = getCodecByName(env, codec_name);
     if (!codec) {
         LOGE("Codec not found.");
@@ -244,7 +261,8 @@ Java_io_github_anilbeesetti_nextlib_media3ext_ffdecoder_FfmpegAudioDecoder_ffmpe
     jclass clazz = env->FindClass("io/github/anilbeesetti/nextlib/media3ext/ffdecoder/FfmpegAudioDecoder");
     growOutputBufferMethod = env->GetMethodID(clazz, "growOutputBuffer","(Landroidx/media3/decoder/SimpleDecoderOutputBuffer;I)Ljava/nio/ByteBuffer;");
     return (jlong) createContext(env, codec, extra_data, output_float, raw_sample_rate,
-                                 raw_channel_count, bits_per_coded_sample, block_align, bit_rate);
+                                 raw_channel_count, bits_per_coded_sample, block_align, bit_rate,
+                                 output_bits);
 }
 
 extern "C"
@@ -332,6 +350,12 @@ Java_io_github_anilbeesetti_nextlib_media3ext_ffdecoder_FfmpegAudioDecoder_ffmpe
         // TODO: Figure out why flushing doesn't work for this codec.
         auto outputFloat =
                 (jboolean) (context->request_sample_fmt == OUTPUT_FORMAT_PCM_FLOAT);
+        int outputBits = 0;
+        if (auto *resampler = (AudioResampler *) context->opaque) {
+            outputBits = resampler->outputBits;
+        } else if (context->request_sample_fmt == AV_SAMPLE_FMT_S32) {
+            outputBits = 24;
+        }
         releaseContext(context);
         auto *codec = const_cast<AVCodec *>(avcodec_find_decoder(codecId));
         if (!codec) {
@@ -343,7 +367,8 @@ Java_io_github_anilbeesetti_nextlib_media3ext_ffdecoder_FfmpegAudioDecoder_ffmpe
                 /* rawChannelCount= */ -1,
                 /* bitsPerCodedSample= */ context->bits_per_coded_sample,
                 /* blockAlign= */ context->block_align,
-                /* bitRate= */ context->bit_rate);
+                /* bitRate= */ context->bit_rate,
+                /* outputBits= */ outputBits);
     }
 
     avcodec_flush_buffers(context);

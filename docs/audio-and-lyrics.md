@@ -20,13 +20,15 @@
 ## 2. 输出与音质
 
 - 输出采样率：自动 / 44.1 / 48 / 88.2 / 96 / 176.4 / 192 kHz；自动模式保留源采样率，超过 192 kHz 的 DSD 自动下采样。
-- 输出位深：16-bit / 32-bit float（依赖设备 AudioTrack 支持）。
+- 输出位深：16-bit / 32-bit float / 24-bit packed（实验性）。24-bit 选项仅在 Android 12（API 31）及以上且通过 AudioTrack 探测时显示；已在 Redmi 设备上确认 AudioTrack `format 0x6`、96 kHz/24-bit 实际输出。修改位深后，下次启动播放服务时生效。
+- 24-bit 模式优先请求 FFmpeg 的整数 24-bit 解码，依次应用增益、重采样与 EQ，再输出小端三字节 PCM。AudioTrack 创建或写入失败时自动切回 Media3 的 16-bit 输出。Android 的混音和路由仍可能改变最终设备端的格式。
 - 自研 32-tap Lanczos 加窗 sinc 重采样器，带抗混叠截止频率和滤波历史，流式处理不中断播放。
 - DSD / 高采样率增益：0–12 dB，用于 DSD 转 PCM 后的电平补偿。
 - 10 段均衡器（31 Hz–16 kHz，±12 dB），内置平直/流行/摇滚/爵士/古典/低音/人声/轻音乐预设。
 - 无间隙播放开关；播放条与进度条使用 Monet 取色的流光渐变。
-- USB 音频（Pro/实验性）：检测 USB DAC、申请 USB 权限、展示采样率/位深能力，并把 `AudioTrack` 的 preferred device 固定到 USB 输出。
-  - 说明：Android 公共 API 不提供等时 USB 音频传输，真正的 bit-perfect USB 独占需要 UAC 驱动/系统支持；当前实现提供直连路由与能力展示，不做虚假的“位完美”承诺。
+- USB 音频：
+  - 普通 USB 直连：检测 USB DAC、申请权限、把 `AudioTrack` 的 preferred device 固定到 USB 输出（非 bit-perfect）。
+  - **USB 独占（bit-perfect，实验性）**：新增 `lplayer/lib-usb-uac`，通过 libusb `libusb_wrap_sys_device` + UAC 等时传输把解码后的 PCM 直接写入 DAC；支持 UAC2 时钟源采样率控制、异步反馈端点、UAC1 回退、24-bit packed 子帧；绕过重采样/EQ/增益/淡入淡出。无 DAC 时不启用，自动回退 AudioTrack。
 
 ## 3. 逐字歌词 / SPL
 
@@ -57,14 +59,13 @@
 - Alpha（R8 混淆）构建可正常启动与播放，JNI 保活规则已加入 `consumer-rules.pro`。
 - 单元测试：
   - `:lmedia:testDebugUnitTest`：SPL 解析（翻译、重复时间戳、逐字、延迟字、awlrc、行尾时间戳）。
-  - `:lplayer:testDebugUnitTest`：sinc 重采样输出帧数、单位增益。
+  - `:lplayer:testDebugUnitTest`：sinc 重采样输出帧数、单位增益，以及 24-bit PCM 量化与字节序。
 
 ## 6. 已知限制
 
 - 部分历史预编译 `.so`（libblur、libflacJNI、libfpcalc、libtaglib）仍为 4 KB ELF 对齐；在 Android 16 的 debug 构建中会出现 16 KB 兼容性提示。本项目新增的 `libmedia3ext.so` 已按 16 KB 链接。
-- 真 USB 独占 / UAC 等时传输未实现；当前是 preferred device 直连路由。
+- USB 等时独占已实现并通过 native 构建与描述符 host 测试，但当前测试设备未连接 USB DAC，实际 DAC 播放/异步反馈硬件回归尚未完成；无 DAC 时自动回退 AudioTrack。
 - DFF 仅支持未压缩 DSD chunk；DST 压缩 DSDIFF 未实现。
-- 24-bit packed 输出尚未开放（当前 16-bit / 32-bit float）。
 - TAK/Shorten 等格式视 FFmpeg 解码器与容器支持，未做逐格式回归。
 
 ## 7. 构建 FFmpeg（可选）

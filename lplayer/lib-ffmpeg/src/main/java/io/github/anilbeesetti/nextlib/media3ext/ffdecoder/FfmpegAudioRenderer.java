@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.audio.DecoderAudioRenderer;
 import androidx.media3.exoplayer.audio.DefaultAudioSink;
 
 import android.os.Handler;
+import java.util.function.IntSupplier;
 
 /** Decodes and renders audio using FFmpeg as a software fallback / forced software engine. */
 @UnstableApi
@@ -24,6 +25,7 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
     private static final int DEFAULT_INPUT_BUFFER_SIZE = 256 * 1024;
 
     private final boolean preferFloatOutput;
+    private final IntSupplier outputBitsProvider;
 
     public FfmpegAudioRenderer() {
         this(null, null);
@@ -47,8 +49,19 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
             @Nullable AudioRendererEventListener eventListener,
             AudioSink audioSink,
             boolean preferFloatOutput) {
+        this(eventHandler, eventListener, audioSink, preferFloatOutput,
+                () -> preferFloatOutput ? 32 : 16);
+    }
+
+    public FfmpegAudioRenderer(
+            @Nullable Handler eventHandler,
+            @Nullable AudioRendererEventListener eventListener,
+            AudioSink audioSink,
+            boolean preferFloatOutput,
+            IntSupplier outputBitsProvider) {
         super(eventHandler, eventListener, audioSink);
         this.preferFloatOutput = preferFloatOutput;
+        this.outputBitsProvider = outputBitsProvider;
     }
 
     @Override
@@ -85,12 +98,14 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
         int initialInputBufferSize = format.maxInputSize != Format.NO_VALUE
                 ? format.maxInputSize
                 : DEFAULT_INPUT_BUFFER_SIZE;
+        int outputBits = outputBitsProvider.getAsInt();
         FfmpegAudioDecoder decoder = new FfmpegAudioDecoder(
                 format,
                 NUM_BUFFERS,
                 NUM_BUFFERS,
                 initialInputBufferSize,
-                preferFloatOutput);
+                outputBits == 32,
+                outputBits);
         TraceUtil.endSection();
         return decoder;
     }

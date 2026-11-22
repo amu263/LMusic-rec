@@ -14,9 +14,10 @@ void releaseContext(AVCodecContext *context) {
     if (!context) {
         return;
     }
-    SwrContext *swrContext;
-    if ((swrContext = (SwrContext *)context->opaque)) {
-        swr_free(&swrContext);
+    auto *resampler = (AudioResampler *) context->opaque;
+    if (resampler) {
+        if (resampler->swr) swr_free(&resampler->swr);
+        av_free(resampler);
         context->opaque = nullptr;
     }
     av_freep(&context->extradata);

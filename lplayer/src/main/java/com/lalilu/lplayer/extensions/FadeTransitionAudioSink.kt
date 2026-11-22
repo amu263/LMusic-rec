@@ -14,6 +14,8 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
+import com.lalilu.lplayer.audio.AudioSettings
+import com.lalilu.lplayer.audio.Pcm24AudioSink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -66,8 +68,10 @@ open class FadeTransitionRenderersFactory(
     val scope: CoroutineScope,
     teeBufferListener: TeeAudioProcessor.AudioBufferSink? = null,
     private val extraAudioProcessors: Array<AudioProcessor> = emptyArray(),
-    private val forceFloatOutput: Boolean = false,
+    private val outputBitDepth: Int = AudioSettings.BIT_DEPTH_16,
 ) : DefaultRenderersFactory(context), AudioProcessorChain {
+
+    protected val preferFloatOutput = outputBitDepth != AudioSettings.BIT_DEPTH_16
 
     private val teeAudioProcessor = teeBufferListener
         ?.let { TeeAudioProcessor(it) }
@@ -89,13 +93,19 @@ open class FadeTransitionRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean
     ): AudioSink {
+        val usePackedOutput = outputBitDepth == AudioSettings.BIT_DEPTH_24 && Pcm24AudioSink.isSupported(context)
         val defaultAudioSink = DefaultAudioSink.Builder(context)
-            .setEnableFloatOutput(enableFloatOutput || forceFloatOutput)
+            .setEnableFloatOutput(!usePackedOutput && (enableFloatOutput || preferFloatOutput))
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessorChain(this)
             .build()
 
-        return FadeTransitionAudioSink(defaultAudioSink, scope).also {
+        val sink = if (usePackedOutput) {
+            Pcm24AudioSink(defaultAudioSink, getAudioProcessors())
+        } else {
+            defaultAudioSink
+        }
+        return FadeTransitionAudioSink(sink, scope).also {
             it.setPreferredDevice(preferredDevice)
             lastAudioSink = it
         }

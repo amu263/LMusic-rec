@@ -14,6 +14,7 @@ object MPlayerKV : BaseKV(prefix = "mplayer") {
     val eqEnabled = obtain<Boolean>("eq_enabled")
     val eqBands = obtain<String>("eq_bands")
     val usbExclusive = obtain<Boolean>("usb_exclusive")
+    val usbBitPerfect = obtain<Boolean>("usb_bit_perfect")
     val usbDeviceId = obtain<String>("usb_device_id")
     val gaplessEnabled = obtain<Boolean>("gapless_enabled")
 }

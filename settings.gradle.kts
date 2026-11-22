@@ -26,6 +26,7 @@ include(":lmedia")
 include(":lplayer")
 include(":lplayer:lib-decoder-flac")
 include(":lplayer:lib-ffmpeg")
+include(":lplayer:lib-usb-uac")
 
 include(":lplaylist")
 include(":lhistory")

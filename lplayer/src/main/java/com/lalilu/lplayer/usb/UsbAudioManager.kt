@@ -7,21 +7,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.lalilu.usbuac.UsbAudioSession
 
-/**
- * Lightweight USB audio discovery and routing helper.
- *
- * Android does not expose a public isochronous USB audio API, so true bit-perfect "exclusive"
- * playback requires a UAC driver. LMusic uses the closest platform-supported route: it detects
- * USB DACs, requests USB permission, reads the advertised capabilities and pins the AudioTrack
- * to the matching [AudioDeviceInfo] (bypassing the default speaker/headphone route).
- */
+/** USB discovery, permission and AudioTrack fallback routing. */
 object UsbAudioManager {
     const val ACTION_USB_PERMISSION = "com.lalilu.lmusic.USB_PERMISSION"
 
@@ -53,6 +46,12 @@ object UsbAudioManager {
     fun findDeviceById(context: Context, id: String?): Device? {
         if (id.isNullOrBlank()) return null
         return listDevices(context).firstOrNull { it.id == id }
+    }
+
+    fun selectExclusiveDevice(devices: List<Device>, id: String?): Device? {
+        if (id.isNullOrBlank()) return devices.singleOrNull()
+        return devices.firstOrNull { it.id == id }
+            ?: devices.singleOrNull { it.id.substringAfter(':') == id.substringAfter(':') }
     }
 
     fun listDevices(context: Context): List<Device> {
@@ -113,14 +112,18 @@ object UsbAudioManager {
     fun requestPermission(context: Context, device: UsbDevice): Boolean {
         val manager = context.getSystemService(Context.USB_SERVICE) as? UsbManager ?: return false
         if (manager.hasPermission(device)) return true
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_IMMUTABLE
-        } else {
-            0
-        }
+        val flags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
         val intent = Intent(ACTION_USB_PERMISSION).setPackage(context.packageName)
-        val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, flags)
-        manager.requestPermission(device, pendingIntent)
+        val existing = PendingIntent.getBroadcast(context, device.deviceId, intent, flags or PendingIntent.FLAG_NO_CREATE)
+        if (existing != null) return false
+        val pendingIntent = PendingIntent.getBroadcast(context, device.deviceId, intent, flags)
+        try {
+            UsbAudioSession.requestPermission(manager, device, pendingIntent)
+        } catch (failure: RuntimeException) {
+            pendingIntent.cancel()
+            throw failure
+        }
         return false
     }
 
@@ -153,6 +156,7 @@ object UsbAudioManager {
     }
 
     fun findAudioDeviceInfo(context: Context, device: UsbDevice? = null): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return null
         val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         val usbOutputs = outputs.filter {

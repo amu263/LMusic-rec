@@ -16,6 +16,14 @@ extern "C" {
 
 
 /**
+ * State attached to AVCodecContext.opaque: the resampler plus the requested precision.
+ */
+struct AudioResampler {
+    SwrContext *swr;
+    int outputBits;
+};
+
+/**
  * Releases the specified context.
  */
 void releaseContext(AVCodecContext *context);

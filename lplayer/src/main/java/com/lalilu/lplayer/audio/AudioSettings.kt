@@ -1,5 +1,6 @@
 package com.lalilu.lplayer.audio
 
+import android.content.Context
 import androidx.media3.common.util.UnstableApi
 
 /**
@@ -19,6 +20,7 @@ object AudioSettings {
     const val SAMPLE_RATE_AUTO = 0
 
     const val BIT_DEPTH_16 = 16
+    const val BIT_DEPTH_24 = 24
     const val BIT_DEPTH_FLOAT = 32
 
     @Volatile
@@ -29,6 +31,12 @@ object AudioSettings {
 
     @Volatile
     var outputBitDepth: Int = BIT_DEPTH_16
+
+    fun resolveOutputBitDepth(context: Context, value: Int?): Int = when (value) {
+        BIT_DEPTH_FLOAT -> BIT_DEPTH_FLOAT
+        BIT_DEPTH_24 -> if (Pcm24AudioSink.isSupported(context)) BIT_DEPTH_24 else BIT_DEPTH_FLOAT
+        else -> BIT_DEPTH_16
+    }
 
     /** DSD / high-resolution pre-gain in dB, 0..12. */
     @Volatile
@@ -50,6 +58,9 @@ object AudioSettings {
 
     @Volatile
     var usbExclusive: Boolean = false
+
+    @Volatile
+    var usbBitPerfect: Boolean = false
 
     @Volatile
     var gaplessEnabled: Boolean = true

@@ -1,5 +1,6 @@
 package com.lalilu.lmusic.compose.new_screen
 
+import android.content.Context
 import android.hardware.usb.UsbManager
 import android.widget.Toast
 import androidx.compose.foundation.clickable
@@ -15,11 +16,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -42,10 +45,15 @@ import com.lalilu.component.settings.SettingStateSeekBar
 import com.lalilu.component.settings.SettingSwitcher
 import com.lalilu.lplayer.MPlayerKV
 import com.lalilu.lplayer.audio.AudioSettings
+import com.lalilu.lplayer.audio.Pcm24AudioSink
 import com.lalilu.lplayer.usb.UsbAudioManager
+import com.lalilu.lplayer.usb.UsbOutputDiagnostics
+import com.lalilu.usbuac.UsbAudioSession
 import com.lalilu.remixicon.System
 import com.lalilu.remixicon.system.settings4Line
 import com.zhangke.krouter.annotation.Destination
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @Destination("/pages/audio_settings")
@@ -72,6 +80,14 @@ private fun AudioSettingsContent() {
     val decoderMode = MPlayerKV.decoderMode
     val outputSampleRate = MPlayerKV.outputSampleRate
     val outputBitDepth = MPlayerKV.outputBitDepth
+    val packedOutput = produceState(false, context) {
+        value = withContext(Dispatchers.IO) { Pcm24AudioSink.isSupported(context) }
+    }
+    val bitDepths = buildList {
+        add(AudioSettings.BIT_DEPTH_16 to "16-bit")
+        add(AudioSettings.BIT_DEPTH_FLOAT to "32-bit float")
+        if (packedOutput.value) add(AudioSettings.BIT_DEPTH_24 to "24-bit（实验性）")
+    }
     val dsdGain = MPlayerKV.dsdGainDb
     val eqEnabled = MPlayerKV.eqEnabled
     val eqBands = MPlayerKV.eqBands
@@ -133,11 +149,23 @@ private fun AudioSettingsContent() {
                     subTitle = "自动模式保留源采样率，超过 192 kHz 的 DSD 会下采样到 192 kHz"
                 )
                 SettingStateSeekBar(
-                    state = { if ((outputBitDepth.value ?: 16) == 32) 1 else 0 },
-                    onStateUpdate = { outputBitDepth.value = if (it == 1) 32 else 16 },
-                    selection = listOf("16-bit", "32-bit float"),
+                    state = {
+                        val storedDepth = outputBitDepth.value
+                        val displayedDepth = if (storedDepth == AudioSettings.BIT_DEPTH_24 && !packedOutput.value) {
+                            AudioSettings.BIT_DEPTH_FLOAT
+                        } else {
+                            storedDepth
+                        }
+                        bitDepths.indexOfFirst { it.first == displayedDepth }.coerceAtLeast(0)
+                    },
+                    onStateUpdate = { index -> bitDepths.getOrNull(index)?.let { outputBitDepth.value = it.first } },
+                    selection = bitDepths.map { it.second },
                     title = "输出位深",
-                    subTitle = "32-bit float 需要设备支持浮点输出，可保留更多动态范围"
+                    subTitle = if (packedOutput.value) {
+                        "24-bit packed 为实验性输出，初始化失败时自动回退。修改后将在下次启动播放服务时生效。"
+                    } else {
+                        "32-bit float 需要设备支持浮点输出。修改后将在下次启动播放服务时生效。"
+                    }
                 )
                 SettingProgressSeekBar(
                     value = { (dsdGain.value ?: 0).toFloat() },
@@ -206,9 +234,21 @@ private fun AudioSettingsContent() {
             ) {
                 SettingSwitcher(
                     state = { usbExclusive.value == true },
-                    onStateUpdate = { usbExclusive.value = it },
-                    title = "USB 独占 / 直连模式",
-                    subTitle = "优先将音频直接路由到 USB DAC；实际独占能力取决于设备与系统"
+                    onStateUpdate = {
+                        if (it) MPlayerKV.usbBitPerfect.value = false
+                        usbExclusive.value = it
+                    },
+                    title = "USB 直连（AudioTrack routing）",
+                    subTitle = "优先将 Android 音频路由到 USB DAC"
+                )
+                SettingSwitcher(
+                    state = { MPlayerKV.usbBitPerfect.value == true },
+                    onStateUpdate = {
+                        MPlayerKV.usbBitPerfect.value = it
+                        if (it) usbExclusive.value = false
+                    },
+                    title = "USB 独占（bit-perfect，实验性）",
+                    subTitle = "等时 USB 传输，保留解码后 PCM；设备或格式不支持时切回 AudioTrack"
                 )
                 UsbAudioDeviceList()
             }
@@ -224,11 +264,24 @@ private fun UsbAudioDeviceList() {
     var devices by remember { mutableStateOf(UsbAudioManager.listDevices(context)) }
     var permissionTick by remember { mutableIntStateOf(0) }
     val selectedId = MPlayerKV.usbDeviceId.value
+    val status by UsbOutputDiagnostics.status.collectAsState()
+    var descriptors by remember { mutableStateOf("") }
+    val selected = UsbAudioManager.selectExclusiveDevice(devices, selectedId)
+    LaunchedEffect(selected?.id, permissionTick) {
+        descriptors = ""
+        val usb = selected?.usbDevice ?: return@LaunchedEffect
+        if (!UsbAudioManager.hasPermission(context, usb)) return@LaunchedEffect
+        descriptors = withContext(Dispatchers.IO) {
+            val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+            runCatching { UsbAudioSession.describe(manager, usb).joinToString("\n") }
+                .getOrElse { "读取 USB 描述符失败 · ${it.message}" }
+        }
+    }
 
     val permissionReceiver = remember {
         UsbAudioManager.permissionReceiver { _, granted ->
             permissionTick++
-            if (granted) Toast.makeText(context, "USB 权限已授予，请重新选择设备", Toast.LENGTH_SHORT).show()
+            if (granted) Toast.makeText(context, "USB 权限已授予", Toast.LENGTH_SHORT).show()
             else Toast.makeText(context, "USB 权限被拒绝", Toast.LENGTH_SHORT).show()
         }
     }
@@ -257,6 +310,14 @@ private fun UsbAudioDeviceList() {
         devices = UsbAudioManager.listDevices(context)
     }
 
+    if (status.isNotEmpty()) {
+        Text(
+            text = status,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            fontSize = 12.sp
+        )
+    }
+
     if (devices.isEmpty()) {
         Text(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
@@ -268,17 +329,17 @@ private fun UsbAudioDeviceList() {
     }
 
     devices.forEach { device ->
-        val isSelected = device.id == selectedId
+        val isSelected = device.id == selectedId ||
+            (MPlayerKV.usbBitPerfect.value == true && device.id == selected?.id)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
+                    MPlayerKV.usbDeviceId.value = device.id
+                    if (MPlayerKV.usbBitPerfect.value != true) MPlayerKV.usbExclusive.value = true
                     if (!UsbAudioManager.hasPermission(context, device.usbDevice)) {
                         UsbAudioManager.requestPermission(context, device.usbDevice)
-                        Toast.makeText(context, "请在系统弹窗中允许访问 USB 设备", Toast.LENGTH_SHORT).show()
                     } else {
-                        MPlayerKV.usbDeviceId.value = device.id
-                        MPlayerKV.usbExclusive.value = true
                         Toast.makeText(context, "已选择 ${device.name}", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -297,10 +358,11 @@ private fun UsbAudioDeviceList() {
             )
         }
     }
-    Text(
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-        text = "说明：Android 公共 API 不提供等时 USB 音频传输，本模式会将 AudioTrack 直接路由到 USB DAC，绕过默认扬声器/耳机路径。真正的位完美独占需要设备厂商驱动或系统级 UAC 支持。",
-        fontSize = 11.sp,
-        color = androidx.compose.material.MaterialTheme.colors.onBackground.copy(0.4f)
-    )
+    if (descriptors.isNotEmpty()) {
+        Text(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            text = descriptors,
+            fontSize = 11.sp
+        )
+    }
 }

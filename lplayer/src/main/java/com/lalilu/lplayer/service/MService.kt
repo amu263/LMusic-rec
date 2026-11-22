@@ -42,6 +42,7 @@ import com.lalilu.lplayer.extensions.UniversalMediaSourceFactory
 import com.lalilu.lplayer.extensions.playMode
 import com.lalilu.lplayer.extensions.setUpQueueControl
 import com.lalilu.lplayer.usb.UsbAudioManager
+import com.lalilu.lplayer.usb.UsbOutputDiagnostics
 import com.lalilu.lplayer.service.CustomCommand.SeekToNext
 import com.lalilu.lplayer.service.CustomCommand.SeekToPrevious
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +65,10 @@ class MService : MediaLibraryService(), CoroutineScope {
     private var exoPlayer: Player? = null
     private var mediaSession: MediaLibrarySession? = null
     private var renderersFactory: LMusicRenderersFactory? = null
+
+    private var usbRoute: Pair<Boolean, String?>? = null
+    private val requestedUsbPermissions = mutableSetOf<String>()
+    private val usbPermissionReceiver = UsbAudioManager.permissionReceiver { _, _ -> applyUsbRouting() }
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -125,6 +130,7 @@ class MService : MediaLibraryService(), CoroutineScope {
             .build()
 
         startListenForValuesUpdate()
+        UsbAudioManager.registerPermissionReceiver(this, usbPermissionReceiver)
         runCatching {
             registerReceiver(
                 usbReceiver,
@@ -139,6 +145,7 @@ class MService : MediaLibraryService(), CoroutineScope {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(usbReceiver) }
+        UsbAudioManager.unregisterReceiver(this, usbPermissionReceiver)
         // 释放相关实例
         exoPlayer?.stop()
         exoPlayer?.release()
@@ -153,27 +160,57 @@ class MService : MediaLibraryService(), CoroutineScope {
     ): MediaLibrarySession? = mediaSession
 
     private fun applyUsbRouting() = launch(Dispatchers.Main) {
-        val enabled = MPlayerKV.usbExclusive.value == true
-        if (!enabled) {
-            renderersFactory?.setPreferredDevice(null)
-            return@launch
+        val factory = renderersFactory ?: return@launch
+        val exclusive = MPlayerKV.usbBitPerfect.value == true
+        val platformUsb = MPlayerKV.usbExclusive.value == true
+        val selectedId = MPlayerKV.usbDeviceId.value
+        val devices = if (exclusive || platformUsb) UsbAudioManager.listDevices(this@MService) else emptyList()
+        requestedUsbPermissions.retainAll(devices.map { it.id }.toSet())
+        val selected = if (exclusive) {
+            UsbAudioManager.selectExclusiveDevice(devices, selectedId)
+        } else {
+            devices.firstOrNull { it.id == selectedId } ?: devices.firstOrNull()
         }
-        val selected = UsbAudioManager.findDeviceById(
-            this@MService,
-            MPlayerKV.usbDeviceId.value
-        ) ?: UsbAudioManager.listDevices(this@MService).firstOrNull()
+        val usb = selected?.usbDevice
+        val permitted = usb != null && UsbAudioManager.hasPermission(this@MService, usb)
+        if (exclusive && usb != null && !permitted && requestedUsbPermissions.add(selected.id)) {
+            runCatching { UsbAudioManager.requestPermission(this@MService, usb) }
+                .onFailure { UsbOutputDiagnostics.route("AudioTrack fallback · ${it.message}") }
+        }
 
-        val audioDevice = selected?.usbDevice?.let {
-            UsbAudioManager.findAudioDeviceInfo(this@MService, it)
-        } ?: UsbAudioManager.findAudioDeviceInfo(this@MService)
-        renderersFactory?.setPreferredDevice(audioDevice)
+        factory.usbDevice = if (exclusive && permitted) usb else null
+        AudioSettings.usbBitPerfect = exclusive
+        val audioDevice = if (exclusive) {
+            usb?.let { UsbAudioManager.findAudioDeviceInfo(this@MService, it) }
+        } else if (platformUsb) {
+            UsbAudioManager.findAudioDeviceInfo(this@MService, usb)
+        } else null
+        factory.setPreferredDevice(audioDevice)
+
+        val route = exclusive to (if (exclusive && permitted) selected?.id else null)
+        if (route != usbRoute) {
+            if (exclusive) {
+                UsbOutputDiagnostics.route(when {
+                    selected == null -> "AudioTrack fallback · No selected USB DAC connected"
+                    !permitted -> "AudioTrack fallback · USB permission required"
+                    else -> "USB DAC ready · ${selected.name}"
+                })
+            } else {
+                UsbOutputDiagnostics.route(if (platformUsb) "AudioTrack USB routing" else "Android audio output")
+            }
+            val player = exoPlayer
+            if (usbRoute != null && player != null && player.currentMediaItem != null &&
+                player.playbackState != Player.STATE_IDLE && player.isCurrentMediaItemSeekable) {
+                player.seekTo(player.currentPosition)
+            }
+        }
+        usbRoute = route
     }
 
     private fun syncAudioSettings() {
         AudioSettings.decoderMode = MPlayerKV.decoderMode.value ?: AudioSettings.DECODER_AUTO
         AudioSettings.outputSampleRate = MPlayerKV.outputSampleRate.value ?: AudioSettings.SAMPLE_RATE_AUTO
-        AudioSettings.outputBitDepth = (MPlayerKV.outputBitDepth.value ?: 0).takeIf { it != 0 }
-            ?: AudioSettings.BIT_DEPTH_16
+        AudioSettings.outputBitDepth = AudioSettings.resolveOutputBitDepth(this, MPlayerKV.outputBitDepth.value)
         AudioSettings.dsdGainDb = MPlayerKV.dsdGainDb.value ?: 0
         AudioSettings.eqEnabled = MPlayerKV.eqEnabled.value ?: false
         AudioSettings.eqBands = MPlayerKV.eqBands.value
@@ -183,6 +220,7 @@ class MService : MediaLibraryService(), CoroutineScope {
             ?.takeIf { it.size == 10 }
             ?: AudioSettings.eqBands
         AudioSettings.usbExclusive = MPlayerKV.usbExclusive.value ?: false
+        AudioSettings.usbBitPerfect = MPlayerKV.usbBitPerfect.value ?: false
         AudioSettings.gaplessEnabled = MPlayerKV.gaplessEnabled.value ?: true
     }
 
@@ -215,8 +253,7 @@ class MService : MediaLibraryService(), CoroutineScope {
         }.launchIn(this)
 
         MPlayerKV.outputBitDepth.flow().onEach {
-            AudioSettings.outputBitDepth = (it ?: 0).takeIf { value -> value != 0 }
-                ?: AudioSettings.BIT_DEPTH_16
+            AudioSettings.outputBitDepth = AudioSettings.resolveOutputBitDepth(this@MService, it)
         }.launchIn(this)
 
         MPlayerKV.dsdGainDb.flow().onEach {
@@ -234,6 +271,10 @@ class MService : MediaLibraryService(), CoroutineScope {
 
         MPlayerKV.usbExclusive.flow().onEach {
             AudioSettings.usbExclusive = it ?: false
+            applyUsbRouting()
+        }.launchIn(this)
+
+        MPlayerKV.usbBitPerfect.flow().onEach {
             applyUsbRouting()
         }.launchIn(this)
 

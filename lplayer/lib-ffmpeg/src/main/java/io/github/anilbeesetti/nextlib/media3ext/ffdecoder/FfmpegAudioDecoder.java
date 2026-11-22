@@ -30,6 +30,7 @@ final class FfmpegAudioDecoder extends SimpleDecoder<DecoderInputBuffer, SimpleD
     @Nullable
     private final byte[] extraData;
     private final @C.PcmEncoding int encoding;
+    private final int outputBits;
     private int outputBufferSize;
 
     private long nativeContext;
@@ -42,7 +43,8 @@ final class FfmpegAudioDecoder extends SimpleDecoder<DecoderInputBuffer, SimpleD
             int numInputBuffers,
             int numOutputBuffers,
             int initialInputBufferSize,
-            boolean outputFloat) throws FfmpegDecoderException {
+            boolean outputFloat,
+            int outputBits) throws FfmpegDecoderException {
         super(new DecoderInputBuffer[numInputBuffers], new SimpleDecoderOutputBuffer[numOutputBuffers]);
         if (!FfmpegLibrary.isAvailable()) {
             throw new FfmpegDecoderException("Failed to load decoder native library.");
@@ -50,10 +52,15 @@ final class FfmpegAudioDecoder extends SimpleDecoder<DecoderInputBuffer, SimpleD
         String mimeType = checkNotNull(format.sampleMimeType);
         codecName = checkNotNull(FfmpegLibrary.getCodecName(mimeType));
         extraData = getExtraData(mimeType, format.initializationData);
-        encoding = outputFloat ? C.ENCODING_PCM_FLOAT : C.ENCODING_PCM_16BIT;
-        outputBufferSize = outputFloat
-                ? INITIAL_OUTPUT_BUFFER_SIZE_32BIT
-                : INITIAL_OUTPUT_BUFFER_SIZE_16BIT;
+        this.outputBits = outputBits;
+        encoding = outputBits == 24
+                ? C.ENCODING_PCM_24BIT
+                : (outputFloat ? C.ENCODING_PCM_FLOAT : C.ENCODING_PCM_16BIT);
+        outputBufferSize = outputBits == 24
+                ? INITIAL_OUTPUT_BUFFER_SIZE_16BIT * 3 / 2
+                : (outputFloat
+                    ? INITIAL_OUTPUT_BUFFER_SIZE_32BIT
+                    : INITIAL_OUTPUT_BUFFER_SIZE_16BIT);
         int bitsPerCodedSample = 0;
         int blockAlign = 0;
         int bitRate = 0;
@@ -81,7 +88,8 @@ final class FfmpegAudioDecoder extends SimpleDecoder<DecoderInputBuffer, SimpleD
                 format.channelCount,
                 bitsPerCodedSample,
                 blockAlign,
-                bitRate);
+                bitRate,
+                outputBits);
         if (nativeContext == 0) {
             throw new FfmpegDecoderException("Initialization failed for " + codecName + ".");
         }
@@ -246,7 +254,8 @@ final class FfmpegAudioDecoder extends SimpleDecoder<DecoderInputBuffer, SimpleD
             int rawChannelCount,
             int bitsPerCodedSample,
             int blockAlign,
-            int bitRate);
+            int bitRate,
+            int outputBits);
 
     private native int ffmpegDecode(
             long context,
