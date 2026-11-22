@@ -17,7 +17,7 @@
 
 - 全格式音频软解：APE、DSD（DSF/DFF）、WMA、WavPack、TTA、TAK、AIFF、ALAC 等，硬件优先、FFmpeg 自动接管，也可强制仅软解。
 - 音频输出：采样率/位深选择（16-bit / 32-bit float / 24-bit packed）、32-tap sinc 重采样、DSD 增益、10 段均衡器、无间隙播放。
-- USB 音频：AudioTrack 直连（兼容）与基于 libusb UAC 等时传输的 bit-perfect 独占（实验性，Pro）。
+- USB 音频：AudioTrack 直连（兼容）与基于 libusb UAC 等时传输的 bit-perfect 独占（实验性，Pro）；已在 MOONDROP Dawn Pro 上验证 16-bit/44.1 与 24-bit/44.1-192 kHz。
 - SPL 逐字歌词：行内逐字/逐词时间戳、`<>` 延迟首字、翻译、显式行结尾、`.spl`/`.lrc` 外挂歌词。
 - 视觉：首页头条与播放条使用毛玻璃 + Monet 取色流光文字，保持原有布局与交互。
 - 详细说明见 [`docs/audio-and-lyrics.md`](docs/audio-and-lyrics.md)。

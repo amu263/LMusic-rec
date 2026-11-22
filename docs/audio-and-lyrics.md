@@ -64,7 +64,7 @@
 ## 6. 已知限制
 
 - 部分历史预编译 `.so`（libblur、libflacJNI、libfpcalc、libtaglib）仍为 4 KB ELF 对齐；在 Android 16 的 debug 构建中会出现 16 KB 兼容性提示。本项目新增的 `libmedia3ext.so` 已按 16 KB 链接。
-- USB 等时独占已实现并通过 native 构建与描述符 host 测试，但当前测试设备未连接 USB DAC，实际 DAC 播放/异步反馈硬件回归尚未完成；无 DAC 时自动回退 AudioTrack。
+- USB 等时独占已实测通过（MOONDROP Dawn Pro，UAC2）：16-bit/44.1 kHz（alt=1，input=16bit）与 24-bit/44.1、48、96、192 kHz（alt=2，input=24bit）均正常走流；异步 feedback 稳定，`underruns=0`、`errors=0`。未做 DAC 输出端样本级回环比对。
 - DFF 仅支持未压缩 DSD chunk；DST 压缩 DSDIFF 未实现。
 - TAK/Shorten 等格式视 FFmpeg 解码器与容器支持，未做逐格式回归。
 

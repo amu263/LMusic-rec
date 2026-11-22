@@ -352,10 +352,15 @@ struct Stream {
         if (length == 4) raw = little(data, 4);
         else if (length == 3 && baseHz == 1000) raw = little(data, 3) << 2;
         else return;
-        // UAC2 reports samples per 1 ms USB frame (16.16); convert to per-packet.
-        double value = feedbackSamplesPerPacket(raw, periods, baseHz);
-        if (value >= nominal * 0.97 && value <= nominal * 1.03 &&
-            std::ceil(value) * outputFrame <= chosen.packet) {
+        const double rawValue = raw / 65536.0;
+        // DACs disagree on whether UAC2 feedback is expressed per 125 us packet or per
+        // 1 ms USB frame. Accept either convention when it is close to our nominal size.
+        const double perPacket = rawValue;
+        const double perFrame = rawValue * periods * 1000.0 / baseHz;
+        double value = 0.0;
+        if (std::abs(perPacket - nominal) <= nominal * 0.03) value = perPacket;
+        else if (std::abs(perFrame - nominal) <= nominal * 0.03) value = perFrame;
+        if (value > 0.0 && std::ceil(value) * outputFrame <= chosen.packet) {
             framesPerPacket = value;
             ++feedbackCount;
             feedbackDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);

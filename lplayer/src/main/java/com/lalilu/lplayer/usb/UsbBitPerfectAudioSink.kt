@@ -38,6 +38,7 @@ object UsbOutputDiagnostics {
             "queued=${status.framesWritten} transferred=${status.framesTransferred} " +
             "underruns=${status.underrunPackets} errors=${status.transferErrors} " +
             "feedback=${status.feedbackPackets} libusb=${status.error} volume=${status.hardwareVolumeResult}"
+        Log.d(TAG, mutableStatus.value)
     }
 }
 

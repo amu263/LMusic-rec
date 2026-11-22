@@ -34,3 +34,19 @@ c++ -std=c++17 -fsanitize=address,undefined \
   src/main/cpp/descriptors.cpp src/test/cpp/descriptors_test.cpp -o /tmp/uac-descriptors-test
 /tmp/uac-descriptors-test
 ```
+
+
+## Hardware verification
+
+Tested on a Redmi 23013RK75C (Android 15, arm64) with a MOONDROP Dawn Pro (UAC2):
+
+- 16-bit / 44.1 kHz: `alt=1`, `input=16bit`, asynchronous feedback accepted.
+- 24-bit / 44.1, 48, 96 and 192 kHz: `alt=2`, `input=24bit`, asynchronous feedback accepted.
+- One-second status samples showed growing `transferred` counters with `underruns=0` and
+  `errors=0`. The AudioTrack fallback was not used while these sessions were active.
+
+The feedback converter accepts both common UAC2 conventions: a value expressed per 125 us
+packet (the Dawn Pro uses this) and a value expressed per 1 ms USB frame.
+
+This verifies the USB transport and format path, not a sample-by-sample comparison of the
+DAC's analog output.

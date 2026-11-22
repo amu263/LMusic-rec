@@ -92,12 +92,12 @@ class LMusicRenderersFactory(
             audioSink,
             preferFloatOutput,
         ) {
-            when {
-                AudioSettings.usbBitPerfect -> 24
+            val bits = when {
                 AudioSettings.outputBitDepth == AudioSettings.BIT_DEPTH_24 -> 24
                 AudioSettings.outputBitDepth == AudioSettings.BIT_DEPTH_FLOAT -> 32
                 else -> 16
             }
+            bits
         }
         if (softwareOnly || softwareFirst) {
             out.add(0, renderer)
